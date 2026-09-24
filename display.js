@@ -868,11 +868,24 @@
             await loadSupabase();
 
 
-            supabaseClient =
-                window.supabase.createClient(
-                    SUPABASE_URL,
-                    SUPABASE_KEY
-                );
+            /*
+             * Reuse the page's existing Supabase client when one exists.
+             * This prevents a second GoTrueClient from being created in
+             * the same browser context.
+             */
+            if (window.__DOUGHUB_SUPABASE_CLIENT__) {
+                supabaseClient =
+                    window.__DOUGHUB_SUPABASE_CLIENT__;
+            } else {
+                supabaseClient =
+                    window.supabase.createClient(
+                        SUPABASE_URL,
+                        SUPABASE_KEY
+                    );
+
+                window.__DOUGHUB_SUPABASE_CLIENT__ =
+                    supabaseClient;
+            }
 
 
             createStyles();
