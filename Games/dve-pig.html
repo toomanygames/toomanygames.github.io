@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Smack 'n Punch</title>
+<title>Smack 'n Punch — Mayhem Edition</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #1a1a2e; overflow: hidden; font-family: Consolas, monospace; user-select: none; }
@@ -53,6 +53,13 @@
     70%  { opacity: 1; }
     100% { opacity: 0; top: 10px; }
   }
+
+  .weaponSlot { border:2px solid #8b5cf6; padding:4px 8px; border-radius:6px; background:#17152b; }
+  #weaponName { color:#fbbf24; font-weight:900; }
+  #combo { color:#fb7185; font-weight:900; }
+  #toast { position:fixed; left:50%; top:72px; transform:translateX(-50%); background:#111827; border:2px solid #fbbf24; color:#fff; padding:8px 14px; border-radius:8px; font-weight:900; opacity:0; transition:opacity .15s; pointer-events:none; z-index:10; }
+  #weaponWheel { position:fixed; right:14px; bottom:14px; background:rgba(17,24,39,.94); border:2px solid #8b5cf6; padding:8px; border-radius:10px; font-size:12px; line-height:1.6; }
+  .power { color:#67e8f9; font-weight:900; }
 </style>
 </head>
 <body>
@@ -1805,5 +1812,5 @@ function loop() {
 }
 loop();
 </script>
-</body>
+<div id="toast"></div><div id="weaponWheel"><div class="weaponSlot">1 HAMMER</div><div class="weaponSlot">2 BAT</div><div class="weaponSlot">3 BLASTER</div><div class="weaponSlot">4 BOOMERANG</div><div class="weaponSlot">5 FREEZE</div><div class="power">SHIFT = POWER SMACK</div></div></body>
 </html>
