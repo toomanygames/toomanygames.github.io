@@ -1847,7 +1847,7 @@ footer {
                         id="gameCount"
                         class="hero-stat-number"
                     >
-                        4
+                        6
                     </div>
 
                     <div class="hero-stat-label">
@@ -2540,14 +2540,14 @@ async function updateGameCount() {
         );
 
         gameCount.textContent =
-            "4";
+            "6";
 
         return;
     }
 
     gameCount.textContent =
         (
-            4 +
+            6 +
             (data?.length || 0)
         ).toLocaleString();
 
