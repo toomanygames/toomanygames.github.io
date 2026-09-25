@@ -673,6 +673,94 @@ main {
         0 20px 50px rgba(0,0,0,0.25);
 }
 
+/* FEATURED GAMES */
+.featured-game {
+    grid-column: span 2;
+    min-height: 210px;
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 18px;
+    row-gap: 4px;
+    padding: 23px;
+}
+
+.featured-game .game-icon {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    width: 72px;
+    height: 72px;
+    font-size: 36px;
+    align-self: start;
+}
+
+.featured-game h3 {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0 0 4px;
+    align-self: start;
+}
+
+.featured-game p {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    align-self: start;
+    max-width: 620px;
+}
+
+.featured-game .play-button {
+    grid-column: 2;
+    grid-row: 4;
+    justify-self: start;
+    margin-top: 14px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    color: white;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    font-size: 13px;
+    font-weight: 800;
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: 0.2s;
+}
+
+.featured-game .play-button:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.12);
+}
+
+@media (max-width: 900px) {
+    .featured-game {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 600px) {
+    .featured-game {
+        grid-column: span 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .featured-game .game-icon {
+        width: 62px;
+        height: 62px;
+        margin-bottom: 4px;
+    }
+
+    .featured-game h3 {
+        margin: 8px 0 5px;
+    }
+
+    .featured-game p {
+        margin-bottom: 14px;
+    }
+
+    .featured-game .play-button {
+        align-self: flex-start;
+        margin-top: 0;
+    }
+}
+
 .game-icon {
     width:
         52px;
@@ -1707,6 +1795,44 @@ footer {
                 </div>
             </a>
 
+            <a
+                href="Games/drive-pig.html"
+                class="game-card featured-game"
+            >
+                <div class="game-icon">🐷🚗</div>
+
+                <h3>
+                    Drive Pig
+                </h3>
+
+                <p>
+                    Drive the pig through wild levels, launch off ramps, flip through the air, and try to reach the finish.
+                </p>
+
+                <div class="play-button">
+                    PLAY DRIVE PIG →
+                </div>
+            </a>
+
+            <a
+                href="Games/dve-pig.html"
+                class="game-card featured-game"
+            >
+                <div class="game-icon">👊🐷</div>
+
+                <h3>
+                    Smack 'n Punch
+                </h3>
+
+                <p>
+                    Smack, punch, combo, and cause mayhem with a growing arsenal of weapons.
+                </p>
+
+                <div class="play-button">
+                    PLAY SMACK 'N PUNCH →
+                </div>
+            </a>
+
         </div>
 
     </section>
@@ -2354,7 +2480,7 @@ function updateGameCount() {
 
     gameCount.textContent =
         (
-            4 +
+            6 +
             communityGames.length
         ).toLocaleString();
 
