@@ -845,10 +845,72 @@ main {
         auto;
 
     padding:
-        4px 2px 16px;
+        4px 2px 18px;
 
     scrollbar-width:
         thin;
+
+    scrollbar-color:
+        #7c83ff rgba(255,255,255,0.045);
+
+    scroll-behavior:
+        smooth;
+
+    overscroll-behavior-x:
+        contain;
+}
+
+.community-games::-webkit-scrollbar {
+    height:
+        11px;
+}
+
+.community-games::-webkit-scrollbar-track {
+    background:
+        rgba(255,255,255,0.035);
+
+    border:
+        1px solid rgba(255,255,255,0.06);
+
+    border-radius:
+        999px;
+
+    margin:
+        2px 4px;
+}
+
+.community-games::-webkit-scrollbar-thumb {
+    background:
+        linear-gradient(90deg, #6366f1, #a855f7);
+
+    border:
+        2px solid rgba(2,4,10,0.75);
+
+    border-radius:
+        999px;
+
+    min-width:
+        70px;
+
+    box-shadow:
+        0 0 14px rgba(99,102,241,0.22);
+
+    transition:
+        background 0.2s,
+        box-shadow 0.2s;
+}
+
+.community-games::-webkit-scrollbar-thumb:hover {
+    background:
+        linear-gradient(90deg, #818cf8, #c084fc);
+
+    box-shadow:
+        0 0 18px rgba(139,92,246,0.38);
+}
+
+.community-games::-webkit-scrollbar-corner {
+    background:
+        transparent;
 }
 
 .community-card {
