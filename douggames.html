@@ -2109,6 +2109,9 @@ async function loadAccount() {
    DMAIL COUNT
 ========================================= */
 
+const DMAIL_SEEN_KEY =
+    "doughub_dmail_last_seen";
+
 async function loadDMailCount() {
 
     const badge =
@@ -2120,21 +2123,62 @@ async function loadDMailCount() {
         return;
     }
 
+    badge.textContent = "0";
+    badge.classList.remove("show");
+
     if (!currentUser) {
+        return;
+    }
 
-        badge.textContent =
-            "0";
+    const {
+        data,
+        error
+    } =
+        await supabaseClient
+            .from("direct_messages")
+            .select("created_at")
+            .eq("receiver_id", currentUser.id)
+            .order("created_at", {
+                ascending: false
+            })
+            .limit(1);
 
-        badge.classList.remove(
-            "show"
+    if (error) {
+        console.error(
+            "Could not check DMail count:",
+            error
+        );
+        return;
+    }
+
+    const latestMessage =
+        data?.[0]?.created_at;
+
+    if (!latestMessage) {
+        return;
+    }
+
+    let lastSeen =
+        localStorage.getItem(
+            DMAIL_SEEN_KEY
         );
 
+    /*
+       On the first visit, use the newest existing
+       message as the starting point. This prevents
+       old DMail messages from appearing as new.
+    */
+    if (!lastSeen) {
+        localStorage.setItem(
+            DMAIL_SEEN_KEY,
+            latestMessage
+        );
         return;
     }
 
     const {
         count,
-        error
+        error: countError
     } =
         await supabaseClient
             .from("direct_messages")
@@ -2148,53 +2192,82 @@ async function loadDMailCount() {
             .eq(
                 "receiver_id",
                 currentUser.id
+            )
+            .gt(
+                "created_at",
+                lastSeen
             );
 
-    if (error) {
-
+    if (countError) {
         console.error(
-            "Could not load DMail count:",
-            error
+            "Could not load new DMail count:",
+            countError
         );
-
-        badge.textContent =
-            "0";
-
-        badge.classList.remove(
-            "show"
-        );
-
         return;
     }
 
     const messageCount =
-        Number(
-            count || 0
-        );
+        Number(count || 0);
 
     if (messageCount > 0) {
-
         badge.textContent =
             messageCount > 99
                 ? "99+"
                 : messageCount;
 
-        badge.classList.add(
-            "show"
-        );
-
-    } else {
-
-        badge.textContent =
-            "0";
-
-        badge.classList.remove(
-            "show"
-        );
-
+        badge.classList.add("show");
     }
-
 }
+
+/*
+   Opening DMail marks the current messages as seen.
+*/
+document.addEventListener(
+    "click",
+    function(event) {
+
+        const dmailLink =
+            event.target.closest(
+                'a[href="DMail.html"]'
+            );
+
+        if (!dmailLink) {
+            return;
+        }
+
+        if (currentUser) {
+            supabaseClient
+                .from("direct_messages")
+                .select("created_at")
+                .eq("receiver_id", currentUser.id)
+                .order("created_at", {
+                    ascending: false
+                })
+                .limit(1)
+                .then(function(result) {
+
+                    const latest =
+                        result.data?.[0]?.created_at;
+
+                    if (latest) {
+                        localStorage.setItem(
+                            DMAIL_SEEN_KEY,
+                            latest
+                        );
+                    }
+
+                });
+        }
+
+        const badge =
+            document.getElementById("dmailBadge");
+
+        if (badge) {
+            badge.textContent = "0";
+            badge.classList.remove("show");
+        }
+    }
+);
 
 
 /* =========================================
