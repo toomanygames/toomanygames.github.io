@@ -64,6 +64,7 @@
     let width = 0, height = 0, selectedLevel = 1, selectedWorld = 0, playing = false, isDaily = false;
     let unlockedLevel = Math.max(1, Math.min(25, Number(localStorage.getItem("drive-pig-unlocked-level") || 1)));
     let terrain = [], hazards = [], finish = 0, car, courseName = "", cameraX = 0, jumpQueued = false, bossTimer = 0;
+    let particles = [], skidMarks = [], shake = 0, lastTime = performance.now();
 
     function resize() { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = innerHeight * devicePixelRatio; context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); }
     addEventListener("resize", resize); resize();
@@ -171,10 +172,11 @@
       x = flat(x, ground, 9); finish = x - segment * 3;
       addWorldHazards(worldIndex, level, ground, finish);
       courseName = dailyMode ? `DAILY CHALLENGE: ${localDayKey()}` : `${world.name} ${levelInWorld(level)}: ${world.levels[levelInWorld(level) - 1]}`;
-      car = { x: segment * 3, y: ground - 26, vx: 0, vy: 0, angle: 0, spin: 0, squat: false, grounded: true, crashed: false, won: false };
+      car = { x: segment * 3, y: ground - 26, vx: 0, vy: 0, angle: 0, spin: 0, squat: false, grounded: true, crashed: false, won: false, wheelSpin: 0, airtime: 0 };
       cameraX = 0;
       jumpQueued = false;
       bossTimer = 0;
+      particles = []; skidMarks = []; shake = 0;
     }
 
     function terrainAt(x) {
@@ -184,6 +186,18 @@
     }
     function normalizeAngle(angle) { return Math.atan2(Math.sin(angle), Math.cos(angle)); }
     function slopeAt(x) { return Math.atan2(terrainAt(x + 22) - terrainAt(x - 22), 44); }
+    function particleBurst(x, y, count, type = "dust") {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2, s = Math.random() * 3 + 1;
+        particles.push({x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s-1.5, life: 1, size: Math.random()*5+2, type});
+      }
+    }
+    function updateEffects() {
+      particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .12; p.vx *= .98; p.life -= .035; });
+      particles = particles.filter(p => p.life > 0);
+      skidMarks = skidMarks.filter(m => m.life-- > 0);
+      shake *= .88;
+    }
     function startGame() {
       if (!isDaily && selectedLevel > unlockedLevel) {
         message.textContent = "Finish the previous level to unlock this course.";
@@ -196,6 +210,8 @@
     function crash(text) {
       if (car.crashed || car.won) return;
       car.crashed = true;
+      shake = 16;
+      particleBurst(car.x, car.y, 28, "impact");
       setTimeout(() => showMenu(text), 850);
     }
 
@@ -254,35 +270,48 @@
       const squat = keys.has("ArrowDown") || keys.has("KeyS");
       const groundBeforeMove = terrainAt(car.x) - 13;
       const touchingGround = car.grounded || car.y >= groundBeforeMove - 12;
-      if (jumpQueued && touchingGround) { car.vy = -8.6; car.grounded = false; }
+      if (jumpQueued && touchingGround) {
+        car.vy = -8.9 - Math.min(1.2, Math.max(0, car.vx) * .035);
+        car.grounded = false; car.airtime = 0;
+        particleBurst(car.x - 15, car.y + 20, 8);
+      }
       jumpQueued = false;
       car.squat = squat;
-      if (forward) car.vx += .18;
-      if (backward) car.vx -= .10;
-      car.vx *= .992; car.vx = Math.max(-4, Math.min(9.5, car.vx));
+      if (forward) car.vx += car.grounded ? .20 : .075;
+      if (backward) car.vx -= car.grounded ? .13 : .045;
+      car.vx *= car.grounded ? .991 : .997;
+      car.vx = Math.max(-4.5, Math.min(11, car.vx));
+      car.wheelSpin += car.vx * .14;
       car.vy += .28; car.x += car.vx; car.y += car.vy;
       const front = terrainAt(car.x + 22) - 13, rear = terrainAt(car.x - 22) - 13, ground = (front + rear) / 2;
       if (car.y >= ground) {
         const target = Math.atan2(front - rear, 44);
         const landingTilt = Math.abs(normalizeAngle(car.angle - target));
         if (landingTilt > 2.35) crash("The pig car landed off its wheels. Try another flip.");
-        car.y = ground; car.vy = 0; car.angle = target; car.spin = 0; car.grounded = true;
+        if (!car.grounded && Math.abs(car.vy) > 2.5) {
+          particleBurst(car.x, ground, 9);
+          if (car.airtime > 35) shake = Math.min(8, Math.abs(car.vy) * 1.4);
+        }
+        car.y = ground; car.vy = 0; car.angle = target; car.spin = 0; car.grounded = true; car.airtime = 0;
       }
       else {
-        car.grounded = false;
-        if (forward) car.spin += .014;
-        if (backward) car.spin -= .014;
-        car.spin = Math.max(-.14, Math.min(.14, car.spin));
+        car.grounded = false; car.airtime += 1;
+        if (forward) car.spin += .022;
+        if (backward) car.spin -= .022;
+        car.spin *= .995;
+        car.spin = Math.max(-.20, Math.min(.20, car.spin));
         car.angle += car.spin;
       }
-      cameraX += (Math.max(0, car.x - innerWidth * .31) - cameraX) * .08;
+      cameraX += (Math.max(0, car.x - innerWidth * .31) - cameraX) * .09;
+      if (car.grounded && Math.abs(car.vx) > 7 && Math.random() < .25) particleBurst(car.x - 28, car.y + 20, 1);
       bossTimer += worlds[worldForLevel(selectedLevel)].hazard === "hand" ? 1 : 0;
       checkHazards(cameraX);
       if (car.y > innerHeight + 200 || car.x < 20) crash("That landing scrambled the pig car. Pick a course and try again.");
-      if (car.x >= finish) { car.won = true; unlockNextLevel(); setTimeout(() => showMenu(isDaily ? "Daily challenge cleared. Come back tomorrow for a new course." : unlockedLevel > selectedLevel ? "Level cleared. The next course is unlocked." : "Level cleared. Choose another course, or take on today’s challenge."), 700); }
+      if (car.x >= finish) { car.won = true; particleBurst(car.x, car.y, 55, "win"); shake = 5; unlockNextLevel(); setTimeout(() => showMenu(isDaily ? "Daily challenge cleared. Come back tomorrow for a new course." : unlockedLevel > selectedLevel ? "Level cleared. The next course is unlocked." : "Level cleared. Choose another course, or take on today’s challenge."), 700); }
     }
 
     function draw() {
+      if (shake > .2) { context.save(); context.translate((Math.random()-.5)*shake, (Math.random()-.5)*shake); }
       const world = worlds[worldForLevel(selectedLevel)], view = cameraX, ground = Math.round(innerHeight * .72);
       const sky = context.createLinearGradient(0, 0, 0, innerHeight);
       if (world.hazard === "icicle") { sky.addColorStop(0, "#5d9bd1"); sky.addColorStop(.7, "#dff7ff"); }
@@ -318,7 +347,7 @@
         context.ellipse(innerWidth * .87, innerHeight * .19, 68, 20, 0, 0, Math.PI * 2);
         context.fill();
       }
-      if (!car) return;
+      if (!car) { if (shake > .2) context.restore(); return; }
       const groundFill = world.hazard === "icicle" ? "#ffffff" : world.hazard === "butter" ? "#202020" : world.hazard === "fireball" ? "#b93621" : "#56a848";
       const groundEdge = world.hazard === "icicle" ? "#b9e5f5" : world.hazard === "butter" ? "#050505" : world.hazard === "fireball" ? "#ff6a24" : "#2b6836";
       context.beginPath(); terrain.forEach((point, index) => { const screenX = point.x - view; index ? context.lineTo(screenX, point.y) : context.moveTo(screenX, point.y); }); context.lineTo(innerWidth + 80, innerHeight + 80); context.lineTo(-80, innerHeight + 80); context.closePath(); context.fillStyle = groundFill; context.fill();
@@ -380,18 +409,37 @@
         context.beginPath(); context.roundRect(-58, -28, 116, 170, 30); context.fill(); context.stroke();
         context.fillStyle = "#f3b092"; for (let finger = -42; finger <= 42; finger += 28) context.fillRect(finger - 10, 105, 20, 62); context.restore();
       }
+      particles.forEach(p => {
+        const px = p.x - view;
+        if (px < -20 || px > innerWidth + 20) return;
+        context.globalAlpha = p.life;
+        context.fillStyle = p.type === "impact" ? "#ff5f7d" : p.type === "win" ? "#ffc83d" : "#fff0a6";
+        context.beginPath(); context.arc(px, p.y, p.size * p.life, 0, Math.PI*2); context.fill();
+      });
+      context.globalAlpha = 1;
       const finishX = finish - view, finishY = terrainAt(finish); context.fillStyle = "#fff6df"; context.fillRect(finishX, finishY - 105, 8, 105); context.fillStyle = "#f4518d"; context.fillRect(finishX + 8, finishY - 105, 42, 28); context.fillStyle = "#15213b"; context.font = "bold 13px Trebuchet MS"; context.fillText("FINISH", finishX + 11, finishY - 86);
       const x = car.x - view, y = car.y; context.save(); context.translate(x, y); context.rotate(car.angle); context.scale(1, car.squat ? .68 : 1);
       const wheelColors = world.hazard === "icicle" ? ["#dffaff", "#71b8d1"] : world.hazard === "butter" ? ["#111111", "#f0a12b"] : world.hazard === "fireball" ? ["#35151a", "#ff6a24"] : world.hazard === "smoke" ? ["#302c2b", "#8d8178"] : ["#252334", "#e08d68"];
       context.fillStyle = wheelColors[0]; context.beginPath(); context.arc(-20, 18, 13, 0, Math.PI * 2); context.arc(22, 18, 13, 0, Math.PI * 2); context.fill();
+      context.strokeStyle = wheelColors[1]; context.lineWidth = 2;
+      for (const wheelX of [-20,22]) {
+        context.save(); context.translate(wheelX,18); context.rotate(car.wheelSpin);
+        context.beginPath(); context.moveTo(-6,0); context.lineTo(6,0); context.moveTo(0,-6); context.lineTo(0,6); context.stroke(); context.restore();
+      }
       context.fillStyle = wheelColors[1]; context.beginPath(); context.arc(-20, 18, 5, 0, Math.PI * 2); context.arc(22, 18, 5, 0, Math.PI * 2); context.fill();
-      context.fillStyle = "#ff8db6"; context.fillRect(-33, -22, 66, 33); context.fillStyle = "#ffb8cf"; context.fillRect(21, -36, 27, 28); context.fillStyle = "#bd235d"; context.fillRect(43, -25, 12, 10); context.fillRect(24, -47, 8, 14); context.fillRect(40, -47, 8, 14); context.fillStyle = "#15213b"; context.fillRect(41, -36, 4, 4); context.restore();
+      context.fillStyle = "#ff8db6"; context.fillRect(-33, -22, 66, 33); context.fillStyle = "#ffb8cf"; context.fillRect(21, -36, 27, 28); context.fillStyle = "#bd235d"; context.fillRect(43, -25, 12, 10); context.fillRect(24, -47, 8, 14); context.fillRect(40, -47, 8, 14); context.fillStyle = "#15213b"; context.fillRect(41, -36, 4, 4);
+      context.fillStyle = "#fff"; context.fillRect(37, -33, 8, 8);
+      context.fillStyle = "#15213b"; context.fillRect(40, -31, 3, 3);
+      context.fillStyle = "#bd235d"; context.beginPath(); context.ellipse(51,-19,7,4,0,0,Math.PI*2); context.fill();
+      context.restore();
+      if (shake > .2) context.restore();
     }
     let previousTime = performance.now(), physicsTime = 0;
     function loop(currentTime) {
       physicsTime += Math.min(100, currentTime - previousTime);
       previousTime = currentTime;
       while (physicsTime >= 1000 / 60) { update(); physicsTime -= 1000 / 60; }
+      updateEffects();
       draw();
       requestAnimationFrame(loop);
     }
