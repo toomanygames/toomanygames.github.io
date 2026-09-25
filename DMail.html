@@ -502,6 +502,28 @@ button {
     overflow-wrap: anywhere;
 }
 
+/* ADMIN REPLY BUTTON */
+.admin-reply-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+}
+
+.admin-reply-button {
+    border: 0;
+    border-radius: 10px;
+    padding: 8px 13px;
+    color: white;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.admin-reply-button:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
 /* MODAL */
 
 .modal-backdrop {
@@ -1254,6 +1276,16 @@ async function renderMessages(messages) {
 
                 ${imageHtml}
 
+                <div class="admin-reply-row">
+                    <button
+                        class="admin-reply-button"
+                        type="button"
+                        data-reply-user="${escapeHtml(message.sender_id)}"
+                    >
+                        ↩ Reply
+                    </button>
+                </div>
+
                 <div class="message-time">
                     ${formatDate(message.created_at)}
                 </div>
@@ -1658,6 +1690,40 @@ async function loadOtherMessages() {
 
     view.innerHTML = html;
 }
+
+/* --------------------------------
+   ADMIN REPLY
+-------------------------------- */
+
+function replyToUser(userId) {
+    const profile =
+        allProfiles.find(
+            item => item.id === userId
+        );
+
+    if (!profile) {
+        alert("Could not find that user.");
+        return;
+    }
+
+    openConversation(profile);
+}
+
+document.addEventListener(
+    "click",
+    function(event) {
+        const button =
+            event.target.closest(
+                ".admin-reply-button"
+            );
+
+        if (!button) return;
+
+        replyToUser(
+            button.dataset.replyUser
+        );
+    }
+);
 
 /* --------------------------------
    NAVIGATION
