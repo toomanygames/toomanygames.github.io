@@ -1,1809 +1,438 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Smack 'n Punch</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #1a1a2e; overflow: hidden; font-family: Consolas, monospace; user-select: none; }
-  canvas { display: block; }
-  #hud {
-    position: fixed; top: 0; left: 0; right: 0;
-    display: flex; gap: 6px; padding: 8px 10px;
-    background: rgba(0,0,0,0.55); flex-wrap: wrap; z-index: 10;
-  }
-  .wb {
-    padding: 5px 10px; border: 2px solid #444; border-radius: 5px;
-    background: #22243a; color: #ccc; font-size: 12px; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .wb:hover { background: #3a3c5a; }
-  .wb.active { background: #e63946; border-color: #ff6b6b; color: #fff; }
-  #dmg {
-    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
-    font-size: 18px; color: #fff; background: rgba(0,0,0,0.5);
-    padding: 4px 16px; border-radius: 20px; pointer-events: none;
-  }
-  #reset {
-    position: fixed; bottom: 12px; right: 14px;
-    padding: 6px 14px; background: #444; color: #eee; border: none;
-    border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; cursor: pointer;
-  }
-  #reset:hover { background: #666; }
-  #hudToggle {
-    position: fixed; top: 8px; right: 14px;
-    padding: 5px 10px; background: #444; color: #eee; border: 2px solid #555;
-    border-radius: 5px; font-family: Consolas, monospace; font-size: 12px; cursor: pointer;
-    z-index: 11;
-  }
-  #hudToggle:hover { background: #666; }
-  #homeBtn {
-    position: fixed; bottom: 12px; left: 14px;
-    padding: 6px 14px; background: #2a0d4d; color: #ffd400; border: 2px solid #6a2bd9;
-    border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; cursor: pointer;
-    z-index: 11;
-  }
-  #homeBtn:hover { background: #6a2bd9; color: #fff; }
-  #hud.hidden { display: none; }
-  #dmg.bottom-right {
-    bottom: 12px; right: 14px; left: auto; transform: none;
-  }
-  @keyframes popupFade {
-    0%   { opacity: 1; top: 50px; }
-    70%  { opacity: 1; }
-    100% { opacity: 0; top: 10px; }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drive PIG</title>
+  <style>
+    :root { --ink: #15213b; --paper: #fff6df; --pink: #f4518d; --pink-dark: #bd235d; --sun: #ffc83d; --sky: #63c5e8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: var(--ink); color: var(--ink); font-family: "Trebuchet MS", sans-serif; user-select: none; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #topbar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; pointer-events: none; }
+    .panel { background: rgba(255, 246, 223, .92); border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 8px 11px; }
+    #level { font-size: clamp(14px, 2.2vw, 21px); font-weight: 900; letter-spacing: 0; }
+    #countdown { color: #b33555; font-size: 12px; font-weight: 800; margin-top: 2px; }
+    #controls { font-size: 12px; font-weight: bold; text-align: right; }
+    #overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(21, 33, 59, .38); }
+    #card { width: min(570px, 100%); background: var(--paper); border: 4px solid var(--ink); box-shadow: 9px 9px 0 var(--ink); padding: clamp(20px, 5vw, 38px); text-align: center; }
+    h1 { color: var(--pink-dark); font-size: clamp(34px, 7vw, 62px); line-height: .88; margin: 0; letter-spacing: 0; text-transform: uppercase; }
+    #message { margin: 18px 0; font-weight: bold; line-height: 1.35; }
+    #world-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin: 12px 0 4px; }
+    #world-buttons button { font-size: 12px; }
+    #level-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin: 16px 0; }
+    button { border: 3px solid var(--ink); background: white; color: var(--ink); cursor: pointer; font: 800 15px "Trebuchet MS", sans-serif; min-height: 38px; padding: 7px 11px; box-shadow: 3px 3px 0 var(--ink); }
+    button:disabled { cursor: not-allowed; opacity: .42; box-shadow: 1px 1px 0 var(--ink); }
+    button:hover, button:focus-visible { background: var(--sun); outline: none; transform: translate(1px, 1px); box-shadow: 2px 2px 0 var(--ink); }
+    .daily { background: var(--pink); color: white; }
+    #play { background: var(--sun); min-width: 170px; margin-top: 7px; }
+    .hidden { display: none !important; }
+    @media (max-width: 500px) { #controls { display: none; } #topbar { top: 8px; left: 8px; right: 8px; } .panel { padding: 6px 8px; } }
+  </style>
 </head>
 <body>
-<div id="hud"></div>
-<button id="hudToggle">🔽 HUD</button>
-<canvas id="c"></canvas>
-<div id="dmg">Total damage: 0</div>
-<button id="reset">Reset</button>
-<button id="homeBtn">🏠 Kaicade</button>
+  <canvas id="game" aria-label="Drive Mad Pig driving game"></canvas>
+  <div id="topbar" class="hidden">
+    <div class="panel"><div id="level"></div><div id="countdown"></div></div>
+    <div id="controls" class="panel">RIGHT / D: GO<br>LEFT / A: BRAKE &amp; FLIP<br>SPACE: JUMP &nbsp; DOWN / S: SQUAT<br>R: RESTART</div>
+  </div>
+  <div id="overlay">
+    <main id="card">
+      <h1>Drive Mad<br>Pig Edition</h1>
+      <p id="message">Five worlds. Twenty-five harder courses. Dodge themed hazards, jump with SPACE, and squat with DOWN / S.</p>
+      <div id="world-buttons"></div>
+      <div id="level-buttons"></div>
+      <button id="daily" class="daily">Daily Challenge</button>
+      <br><button id="play">Choose a level</button>
+    </main>
+  </div>
+  <script>
+    "use strict";
+    const canvas = document.querySelector("#game");
+    const context = canvas.getContext("2d");
+    const overlay = document.querySelector("#overlay");
+    const topbar = document.querySelector("#topbar");
+    const levelLabel = document.querySelector("#level");
+    const countdown = document.querySelector("#countdown");
+    const message = document.querySelector("#message");
+    const worldButtons = document.querySelector("#world-buttons");
+    const levelButtons = document.querySelector("#level-buttons");
+    const play = document.querySelector("#play");
+    const daily = document.querySelector("#daily");
+    const keys = new Set();
+    const segment = 72;
+    let width = 0, height = 0, selectedLevel = 1, selectedWorld = 0, playing = false, isDaily = false;
+    let unlockedLevel = Math.max(1, Math.min(25, Number(localStorage.getItem("drive-pig-unlocked-level") || 1)));
+    let terrain = [], hazards = [], finish = 0, car, courseName = "", cameraX = 0, jumpQueued = false, bossTimer = 0;
 
-<script>
-document.getElementById("homeBtn").addEventListener("click", () => {
-  if (window.parent !== window) {
-    window.parent.postMessage({ type: "kaicade-home" }, "*");
-  } else {
-    window.location.href = "kaicade.html";
-  }
-});
-</script>
+    function resize() { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = innerHeight * devicePixelRatio; context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); }
+    addEventListener("resize", resize); resize();
 
-<script>
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-canvas.width = innerWidth;
-canvas.height = innerHeight;
+    function localDayKey() { const now = new Date(); return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`; }
+    function seedForToday() { return [...localDayKey()].reduce((seed, character) => ((seed * 31) + character.charCodeAt(0)) >>> 0, 2166136261); }
+    function seededRandom(seed) { return () => { seed = (seed + 0x6D2B79F5) | 0; let value = Math.imul(seed ^ (seed >>> 15), 1 | seed); value ^= value + Math.imul(value ^ (value >>> 7), 61 | value); return ((value ^ (value >>> 14)) >>> 0) / 4294967296; }; }
+    function secondsUntilTomorrow() { const now = new Date(), tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); return Math.max(0, Math.floor((tomorrow - now) / 1000)); }
+    function updateCountdown() { const seconds = secondsUntilTomorrow(), hours = String(Math.floor(seconds / 3600)).padStart(2, "0"), minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0"), secs = String(seconds % 60).padStart(2, "0"); countdown.textContent = isDaily ? `NEW COURSE IN ${hours}:${minutes}:${secs}` : ""; }
+    setInterval(updateCountdown, 1000);
 
-// ─── WEAPONS ────────────────────────────────────────────────────────────────
-const WEAPONS = [
-  { name: "👊 Punch",    color: "#f4a261", radius: 18,  force: 6,  damage: 5,   type: "hit" },
-  { name: "🔨 Hammer",   color: "#e76f51", radius: 28,  force: 14, damage: 20,  type: "embed" },
-  { name: "⚽ Ball",     color: "#457b9d", radius: 22,  force: 10, damage: 10,  type: "falling_ball" },
-  { name: "💣 Bomb",     color: "#e63946", radius: 80,  force: 22, damage: 50,  type: "explosion" },
-  { name: "🔫 Gun",      color: "#a8dadc", radius: 6,   force: 18, damage: 15,  type: "bullet" },
-  { name: "🪓 Axe",      color: "#e9c46a", radius: 20,  force: 8,  damage: 30,  type: "axe_throw" },
-  { name: "⚡ Shock",    color: "#f8e71c", radius: 50,  force: 5,  damage: 25,  type: "shock" },
-  { name: "🌪️ Tornado",  color: "#90e0ef", radius: 90,  force: 28, damage: 15,  type: "spin" },
-  { name: "🧲 Magnet",   color: "#b5e48c", radius: 70,  force: -20,damage: 0,   type: "pull" },
-  { name: "🔥 Flame",    color: "#ff6b35", radius: 40,  force: 3,  damage: 8,   type: "burn" },
-  { name: "🧊 Freeze",   color: "#caf0f8", radius: 45,  force: 1,  damage: 5,   type: "freeze" },
-  { name: "🪃 Boomer",   color: "#f7b731", radius: 16,  force: 12, damage: 12,  type: "boomerang" },
-  { name: "⛏️ Pickaxe",  color: "#adb5bd", radius: 14,  force: 9,  damage: 22,  type: "embed" },
-  { name: "🍕 Pizza",    color: "#f4a261", radius: 20,  force: 7,  damage: 3,   type: "pizza_rats" },
-  { name: "🚀 Rocket",   color: "#ff4d6d", radius: 100, force: 30, damage: 80,  type: "rocket_fly" },
-  { name: "🌊 Wave",     color: "#48cae4", radius: 85,  force: 15, damage: 10,  type: "wave_attack" },
-  { name: "☄️ Meteor",   color: "#ff9f43", radius: 60,  force: 25, damage: 60,  type: "meteor_slam" },
-  { name: "🔩 Wrench",   color: "#ced4da", radius: 16,  force: 7,  damage: 18,  type: "embed" },
-  { name: "🎸 Guitar",   color: "#a29bfe", radius: 30,  force: 10, damage: 12,  type: "hit" },
-  { name: "💀 Reaper",   color: "#6c757d", radius: 35,  force: 20, damage: 100, type: "embed" },
-  { name: "🧪 Acid",     color: "#2ecc71", radius: 0,   force: 0,  damage: 0,   type: "acid" },
-  { name: "🏭 Crusher",  color: "#888",    radius: 999, force: 40, damage: 2000, type: "crusher" },
-];
+    function addPoint(x, y) { terrain.push({ x, y }); return x; }
+    function flat(x, y, amount = 1) { for (let index = 0; index < amount; index++) x = addPoint(x + segment, y); return x; }
+    function pattern(x, base, values, hazard = "") { values.forEach(value => { x = addPoint(x + segment, base - value); }); if (hazard) hazards.push({ x: x - values.length * segment / 2, type: hazard }); return x; }
+    const patterns = [
+      (x, y) => pattern(x, y, [0, 25, 52, 20, 0], "bump"),
+      (x, y) => pattern(x, y, [0, 30, 65, 95, 95, 65, 30, 0], "stairs"),
+      (x, y) => pattern(x, y, [0, -30, -78, -78, -38, 5, 0], "pit"),
+      (x, y) => pattern(x, y, [0, 40, 0, 55, 0, 42, 0], "hills"),
+      (x, y) => pattern(x, y, [0, 68, 0, 82, 0, 64, 0], "teeth"),
+      (x, y) => pattern(x, y, [0, 38, 80, 132, 172, 110, 40, 0], "peak"),
+      (x, y) => pattern(x, y, [0, 20, 50, 90, 140, 76, 16, 0], "ramp"),
+      (x, y) => pattern(x, y, [0, -34, -75, -44, 18, 48, 12, 0], "dip"),
+      (x, y) => pattern(x, y, [0, 42, 13, 72, 20, 100, 26, 76, 0], "chaos")
+    ];
+    const worlds = [
+      { name: "FREEZER", color: "#bdefff", accent: "#3f8ec4", hazard: "icicle", levels: ["Cold Start", "Slippery Shift", "Icicle Alley", "Whiteout Run", "Frozen Finale"] },
+      { name: "STOVE", color: "#ffd39a", accent: "#d96c21", hazard: "butter", levels: ["Warm Up", "Butter Gap", "Pan Panic", "Kitchen Climb", "Boiling Point"] },
+      { name: "FIRE", color: "#ffb36b", accent: "#d43820", hazard: "fireball", levels: ["Spark Sprint", "Ember Road", "Flame Flight", "Inferno Hills", "Firestorm"] },
+      { name: "SMOKEHOUSE", color: "#b8b0a8", accent: "#5f5148", hazard: "smoke", levels: ["Smolder Start", "Haze Maze", "Low Smoke", "Choking Point", "Smokehouse Finale"] },
+      { name: "HUMAN", color: "#ffd0b8", accent: "#9f3d43", hazard: "hand", levels: ["Kitchen Table", "Human Steps", "Palm Pressure", "Panic Underfoot", "THE GIANT HAND"] }
+    ];
 
-// ─── THEMES ───────────────────────────────────────────────────────────────────
-const THEMES = {
-  classic: {
-    name: "Classic",
-    draw: () => {
-      ctx.fillStyle = "#1a1a2e";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-  },
-  grass: {
-    name: "Grass Meadow",
-    draw: () => {
-      // Sky gradient
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, "#87ceeb");
-      grad.addColorStop(1, "#e0f6ff");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Clouds
-      for (let i = 0; i < 3; i++) {
-        const x = ((Date.now() * 0.01 + i * 300) % (canvas.width + 100)) - 50;
-        ctx.fillStyle = "rgba(255,255,255,0.8)";
-        ctx.beginPath(); ctx.arc(x, 60 + i*30, 30, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(x+25, 70 + i*30, 35, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(x+50, 60 + i*30, 30, 0, Math.PI*2); ctx.fill();
-      }
-      
-      // Trees swaying
-      for (let i = 0; i < 3; i++) {
-        const tx = (i + 0.5) * (canvas.width / 3);
-        const sway = Math.sin(Date.now() * 0.001 + i) * 3;
-        ctx.fillStyle = "#8B4513";
-        ctx.fillRect(tx + sway - 8, FLOOR - 100, 16, 100);
-        ctx.fillStyle = "#228B22";
-        ctx.beginPath(); ctx.arc(tx + sway, FLOOR - 110, 50, 0, Math.PI*2); ctx.fill();
-      }
-      
-      // Swaying grass
-      ctx.strokeStyle = "#7cb342"; ctx.lineWidth = 2;
-      for (let i = 0; i < 20; i++) {
-        const x = (i / 20) * canvas.width;
-        const bend = Math.sin(Date.now() * 0.002 + i * 0.3) * 5;
-        ctx.beginPath(); ctx.moveTo(x, FLOOR); ctx.lineTo(x + bend, FLOOR - 20); ctx.stroke();
-      }
-      
-      // Butterflies
-      for (let i = 0; i < 5; i++) {
-        const bx = (Date.now() * 0.02 + i * 100) % canvas.width;
-        const by = 100 + Math.sin(Date.now() * 0.003 + i) * 50;
-        ctx.fillStyle = ["#ff69b4", "#ffd700", "#00bfff", "#ffb6c1", "#32cd32"][i];
-        ctx.beginPath(); ctx.arc(bx - 3, by, 3, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(bx + 3, by, 3, 0, Math.PI*2); ctx.fill();
-      }
-    }
-  },
-  lava: {
-    name: "Lava Land",
-    draw: () => {
-      // Dark sky
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, "#1a1a1a");
-      grad.addColorStop(1, "#4a1a1a");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // 3 volcanoes
-      for (let i = 0; i < 3; i++) {
-        const vx = (i + 0.5) * (canvas.width / 3);
-        const vy = FLOOR - 150;
-        
-        // Volcano cone
-        ctx.fillStyle = "#5a3a3a";
-        ctx.beginPath(); ctx.moveTo(vx, vy); ctx.lineTo(vx - 60, FLOOR); ctx.lineTo(vx + 60, FLOOR); ctx.closePath(); ctx.fill();
-        
-        // Crater
-        ctx.fillStyle = "#1a1a1a";
-        ctx.beginPath(); ctx.arc(vx, vy, 20, 0, Math.PI*2); ctx.fill();
-        
-        // Lava eruption
-        const eruptTime = Date.now() * 0.003 + i * 2;
-        if (Math.sin(eruptTime) > 0.3) {
-          for (let j = 0; j < 5; j++) {
-            const lx = vx + (Math.random() - 0.5) * 40;
-            const ly = vy - 20 - Math.sin(eruptTime) * 80 - j * 15;
-            const size = 5 + Math.random() * 8;
-            ctx.fillStyle = `rgba(255,${100 + Math.random()*100},0,${0.7 - j*0.1})`;
-            ctx.beginPath(); ctx.arc(lx, ly, size, 0, Math.PI*2); ctx.fill();
-          }
-        }
-      }
-      
-      // Lava ground
-      ctx.fillStyle = "#ff6600";
-      ctx.fillRect(0, FLOOR, canvas.width, canvas.height - FLOOR);
-      ctx.strokeStyle = "#cc3300"; ctx.lineWidth = 3;
-      for (let i = 0; i < 10; i++) {
-        const x = (i / 10) * canvas.width + Math.sin(Date.now() * 0.001 + i) * 10;
-        ctx.beginPath(); ctx.moveTo(x, FLOOR); ctx.lineTo(x + 20, FLOOR + 40); ctx.stroke();
-      }
-    }
-  },
-  bugs: {
-    name: "Bug Forest",
-    draw: () => {
-      // Forest background
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, "#4a7c59");
-      grad.addColorStop(1, "#2d5a3d");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Trees in background
-      for (let i = 0; i < 5; i++) {
-        ctx.fillStyle = "#1a3a1a";
-        const tx = (i + 0.5) * (canvas.width / 5);
-        ctx.fillRect(tx - 20, FLOOR - 120, 40, 120);
-      }
-      
-      // Moving bugs
-      for (let i = 0; i < 8; i++) {
-        const bugTime = Date.now() * 0.001 + i * 500;
-        const bx = (bugTime * 0.5) % canvas.width;
-        const by = 80 + Math.sin(bugTime * 0.002 + i) * 60;
-        
-        ctx.fillStyle = ["#ff00ff", "#00ff00", "#ffff00", "#ff6600"][i % 4];
-        // Bug body
-        ctx.beginPath(); ctx.ellipse(bx, by, 8, 6, 0, 0, Math.PI*2); ctx.fill();
-        // Bug legs
-        for (let j = -1; j <= 1; j++) {
-          ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - 10 + j*8, by + 5); ctx.stroke();
-        }
-      }
-    }
-  },
-  germs: {
-    name: "Germ Lab",
-    draw: () => {
-      // Petri dish background
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0, "#1a2a3a");
-      grad.addColorStop(1, "#0a1a2a");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Moving germs - various microorganisms
-      for (let i = 0; i < 12; i++) {
-        const gx = (Date.now() * 0.0003 * (i+1) + i * Math.PI/2) % canvas.width;
-        const gy = 100 + Math.sin(Date.now() * 0.0002 + i) * 80;
-        const germType = i % 3;
-        
-        if (germType === 0) {
-          // Bacteria - circles
-          ctx.fillStyle = `rgba(255,100,100,0.6)`;
-          ctx.beginPath(); ctx.arc(gx, gy, 8, 0, Math.PI*2); ctx.fill();
-        } else if (germType === 1) {
-          // Virus - spiky spheres
-          ctx.fillStyle = `rgba(100,200,255,0.6)`;
-          ctx.beginPath(); ctx.arc(gx, gy, 6, 0, Math.PI*2); ctx.fill();
-          for (let j = 0; j < 6; j++) {
-            const angle = (j / 6) * Math.PI * 2;
-            ctx.beginPath(); ctx.arc(gx + Math.cos(angle)*10, gy + Math.sin(angle)*10, 2, 0, Math.PI*2); ctx.fill();
-          }
-        } else {
-          // Cells - amoeba shapes
-          ctx.fillStyle = `rgba(200,100,255,0.6)`;
-          ctx.beginPath(); ctx.arc(gx, gy, 10, 0, Math.PI*2); ctx.fill();
-          ctx.beginPath(); ctx.arc(gx + 5, gy - 3, 6, 0, Math.PI*2); ctx.fill();
-        }
-      }
-    }
-  },
-  factory: {
-    name: "Hydraulic Factory",
-    draw: () => {
-      const t = Date.now() * 0.001;
-
-      // Steel wall background
-      const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      bgGrad.addColorStop(0, "#1c1c1c");
-      bgGrad.addColorStop(0.6, "#2a2a2a");
-      bgGrad.addColorStop(1, "#181818");
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Steel panel grid lines
-      ctx.strokeStyle = "rgba(80,80,80,0.4)";
-      ctx.lineWidth = 1;
-      for (let x = 0; x < canvas.width; x += 80) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-      }
-      for (let y = 0; y < canvas.height; y += 80) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-      }
-      // Panel rivets at intersections
-      ctx.fillStyle = "rgba(100,100,100,0.5)";
-      for (let x = 0; x < canvas.width; x += 80) {
-        for (let y = 0; y < canvas.height; y += 80) {
-          ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill();
-        }
-      }
-
-      // Conveyor belt along the floor
-      const beltY = FLOOR + 8;
-      const beltH = 22;
-      ctx.fillStyle = "#333";
-      ctx.fillRect(0, beltY, canvas.width, beltH);
-      // Moving belt segments
-      const beltOffset = (t * 60) % 40;
-      ctx.fillStyle = "#555";
-      for (let x = -40 + beltOffset; x < canvas.width + 40; x += 40) {
-        ctx.fillRect(x, beltY + 3, 20, beltH - 6);
-      }
-      // Belt edges
-      ctx.fillStyle = "#222";
-      ctx.fillRect(0, beltY, canvas.width, 3);
-      ctx.fillRect(0, beltY + beltH - 3, canvas.width, 3);
-
-      // Large hydraulic pistons on the ceiling
-      for (let i = 0; i < 4; i++) {
-        const px = canvas.width * (i + 0.5) / 4;
-        const phase = t * 1.5 + i * Math.PI / 2;
-        const pistonExtend = 60 + Math.abs(Math.sin(phase)) * 120;
-
-        // Cylinder (fixed to ceiling)
-        ctx.fillStyle = "#444";
-        ctx.fillRect(px - 18, 0, 36, 50);
-        ctx.fillStyle = "#555";
-        ctx.fillRect(px - 14, 0, 6, 50); // highlight stripe
-
-        // Rod
-        ctx.strokeStyle = "#888";
-        ctx.lineWidth = 14;
-        ctx.beginPath(); ctx.moveTo(px, 50); ctx.lineTo(px, pistonExtend); ctx.stroke();
-        ctx.strokeStyle = "#aaa";
-        ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(px + 3, 50); ctx.lineTo(px + 3, pistonExtend * 0.7); ctx.stroke();
-
-        // Piston head (press plate)
-        const headGrad = ctx.createLinearGradient(px - 30, pistonExtend, px - 30, pistonExtend + 20);
-        headGrad.addColorStop(0, "#bbb");
-        headGrad.addColorStop(0.5, "#777");
-        headGrad.addColorStop(1, "#444");
-        ctx.fillStyle = headGrad;
-        ctx.fillRect(px - 30, pistonExtend, 60, 20);
-        // Warning stripes on head
-        for (let s = 0; s < 4; s++) {
-          ctx.fillStyle = s % 2 === 0 ? "rgba(255,200,0,0.8)" : "rgba(0,0,0,0.6)";
-          ctx.fillRect(px - 30 + s * 15, pistonExtend, 15, 6);
-        }
-
-        // Steam puff at top of stroke
-        if (Math.sin(phase) > 0.9) {
-          for (let s = 0; s < 3; s++) {
-            const sa = Math.PI / 2 + (s - 1) * 0.4;
-            const sd = 30 + s * 15;
-            ctx.fillStyle = `rgba(200,200,200,${0.3 - s * 0.08})`;
-            ctx.beginPath();
-            ctx.arc(px + Math.cos(sa) * sd * 0.3, 50 + Math.sin(sa) * sd, 12 + s * 5, 0, Math.PI*2);
-            ctx.fill();
-          }
-        }
-      }
-
-      // Warning lights on walls (flashing red/amber)
-      const lightPositions = [40, canvas.width - 40, canvas.width * 0.33, canvas.width * 0.66];
-      for (let i = 0; i < lightPositions.length; i++) {
-        const lx = lightPositions[i];
-        const ly = canvas.height * 0.3 + (i % 2) * 60;
-        const flash = Math.sin(t * 4 + i * Math.PI) > 0;
-        const col = i % 2 === 0 ? (flash ? "#ff3300" : "#330000") : (flash ? "#ffaa00" : "#332200");
-        // Housing
-        ctx.fillStyle = "#333";
-        ctx.beginPath(); ctx.arc(lx, ly, 14, 0, Math.PI*2); ctx.fill();
-        // Bulb
-        ctx.fillStyle = col;
-        ctx.beginPath(); ctx.arc(lx, ly, 9, 0, Math.PI*2); ctx.fill();
-        if (flash) {
-          ctx.fillStyle = i % 2 === 0 ? "rgba(255,50,0,0.15)" : "rgba(255,170,0,0.15)";
-          ctx.beginPath(); ctx.arc(lx, ly, 40, 0, Math.PI*2); ctx.fill();
-        }
-      }
-
-      // Pipes along the top
-      ctx.strokeStyle = "#555";
-      ctx.lineWidth = 12;
-      ctx.beginPath(); ctx.moveTo(0, 30); ctx.lineTo(canvas.width, 30); ctx.stroke();
-      ctx.strokeStyle = "#666";
-      ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(0, 26); ctx.lineTo(canvas.width, 26); ctx.stroke();
-      // Pipe joints
-      for (let x = 80; x < canvas.width; x += 160) {
-        ctx.fillStyle = "#666";
-        ctx.beginPath(); ctx.arc(x, 30, 10, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = "#888";
-        ctx.beginPath(); ctx.arc(x, 30, 5, 0, Math.PI*2); ctx.fill();
-      }
-
-      // Small gear decorations on the walls
-      for (let i = 0; i < 2; i++) {
-        const gx = i === 0 ? 55 : canvas.width - 55;
-        const gy = canvas.height * 0.55;
-        const gr = 28;
-        const grot = t * (i === 0 ? 0.6 : -0.6);
-        ctx.save();
-        ctx.translate(gx, gy);
-        ctx.rotate(grot);
-        ctx.fillStyle = "#444";
-        ctx.beginPath(); ctx.arc(0, 0, gr, 0, Math.PI*2); ctx.fill();
-        // Teeth
-        ctx.fillStyle = "#555";
-        for (let tooth = 0; tooth < 10; tooth++) {
-          const ta = (tooth / 10) * Math.PI * 2;
-          ctx.save();
-          ctx.rotate(ta);
-          ctx.fillRect(-4, -gr - 8, 8, 10);
-          ctx.restore();
-        }
-        // Center hole
-        ctx.fillStyle = "#222";
-        ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.fill();
-        ctx.restore();
-      }
-    }
-  }
-};
-
-let currentTheme = "classic";
-let hudVisible = true; // HUD visibility state
-
-// ─── RAGDOLL ──────────────────────────────────────────────────────────────────
-const CX = canvas.width / 2;
-const FLOOR = canvas.height - 60;
-
-function makeNode(x, y) {
-  return { x, y, px: x, py: y };
-}
-
-function buildDummy(cx, cy) {
-  return {
-    cx, cy, baseCX: cx, // Center position for animations (baseCX is fixed home X)
-    armAnimOffset: Math.random() * Math.PI * 2,
-    health: 100000, // Individual dummy health
-    head:      makeNode(cx,      cy - 200),
-    neck:      makeNode(cx,      cy - 175),
-    chest:     makeNode(cx,      cy - 140),
-    belly:     makeNode(cx,      cy - 105),
-    hip:       makeNode(cx,      cy - 70),
-    lShoulder: makeNode(cx - 35, cy - 145),
-    lElbow:    makeNode(cx - 65, cy - 120),
-    lHand:     makeNode(cx - 85, cy - 95),
-    rShoulder: makeNode(cx + 35, cy - 145),
-    rElbow:    makeNode(cx + 65, cy - 120),
-    rHand:     makeNode(cx + 85, cy - 95),
-    lHip:      makeNode(cx - 18, cy - 65),
-    lKnee:     makeNode(cx - 25, cy - 35),
-    lFoot:     makeNode(cx - 28, cy),
-    rHip:      makeNode(cx + 18, cy - 65),
-    rKnee:     makeNode(cx + 25, cy - 35),
-    rFoot:     makeNode(cx + 28, cy),
-  };
-}
-
-let dummies = [
-  buildDummy(CX, FLOOR),                    // Center dummy
-  buildDummy(CX - 280, FLOOR),             // Left dummy
-  buildDummy(CX + 280, FLOOR),             // Right dummy
-  buildDummy(CX - 140, FLOOR),             // Inner-left dummy
-  buildDummy(CX + 140, FLOOR),             // Inner-right dummy
-];
-let mainDummyIndex = 0; // Index of center dummy for damage tracking
-let totalDamage = 0;
-let particles = [];
-let freezeTimer = 0;
-let pendingEffects = []; // animated weapons waiting to fire
-let standupTimer = 0; // recovery timer when dummy is knocked down
-let lastMouseX = 0, lastMouseY = 0; // Track continuous hold position
-let waveTime = 0; // Timer for wave animation
-let dead = false; // Death state
-let acidDuration = 0; // Acid damage timer in frames
-let acidX = 0, acidY = 0; // Acid vat position
-let rats = []; // Rats from pizza attack
-let pizzaPos = null; // Pizza position on dummy's head
-let pizzaTargetDummyIdx = 0; // Which dummy is being attacked by pizza rats
-let crusherActive = false;   // Is crusher currently running
-let crusherTimer = 0;        // Frames remaining in crush session (10s = 600 frames)
-let crusherCooldown = 0;     // Cooldown frames remaining (5s = 300 frames)
-let crusherPressY = canvas.height * 0.3; // Y position of press plate (animated)
-let stuckAxes = []; // Axes stuck in dummies: {node, offsetX, offsetY, angle}
-
-function getAllNodes() {
-  const allNodes = [];
-  for (const dummy of dummies) allNodes.push(...Object.entries(dummy).filter(([k]) => k!=='cx' && k!=='cy' && k!=='baseCX' && k!=='armAnimOffset' && k!=='health').map(([,v]) => v));
-  return allNodes;
-}
-
-function getNodes() { return Object.entries(dummies[mainDummyIndex]).filter(([k]) => k!=='cx' && k!=='cy' && k!=='baseCX' && k!=='armAnimOffset' && k!=='health').map(([,v]) => v); }
-
-function getDummy() { return dummies[mainDummyIndex]; }
-
-const CONSTRAINTS = [
-  ["head","neck",        20],
-  ["neck","chest",       35],
-  ["chest","belly",      35],
-  ["belly","hip",        35],
-  ["chest","lShoulder",  38],
-  ["lShoulder","lElbow", 35],
-  ["lElbow","lHand",     30],
-  ["chest","rShoulder",  38],
-  ["rShoulder","rElbow", 35],
-  ["rElbow","rHand",     30],
-  ["hip","lHip",         20],
-  ["lHip","lKnee",       38],
-  ["lKnee","lFoot",      38],
-  ["hip","rHip",         20],
-  ["rHip","rKnee",       38],
-  ["rKnee","rFoot",      38],
-  ["neck","belly",       70],
-  ["chest","hip",        70],
-];
-
-function constrain(a, b, len) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  const d = Math.hypot(dx, dy) || 1;
-  const diff = (d - len) / d * 0.5;
-  a.x -= dx * diff;  a.y -= dy * diff;
-  b.x += dx * diff;  b.y += dy * diff;
-}
-
-function integrate() {
-  if (freezeTimer > 0) { freezeTimer--; return; }
-  const gravity = 0.5, damping = 0.98;
-  
-  // Update all dummies
-  for (let di = 0; di < dummies.length; di++) {
-    const dummy = dummies[di];
-    const nodes = Object.entries(dummy).filter(([k]) => k!=='cx' && k!=='cy' && k!=='baseCX' && k!=='armAnimOffset' && k!=='health').map(([,v]) => v);
-    
-    for (const n of nodes) {
-      const vx = (n.x - n.px) * damping;
-      const vy = (n.y - n.py) * damping + gravity;
-      n.px = n.x;  n.py = n.y;
-      n.x += vx;   n.y += vy;
-    }
-    
-    // Dancing sway: all dummies bob and sway side to side
-    const danceTime = Date.now() * 0.002 + di * 1.3;
-    const swayX = Math.sin(danceTime) * 18;
-    const swayY = Math.abs(Math.sin(danceTime * 2)) * 8; // subtle bounce
-    if (di !== mainDummyIndex) {
-      // Side dummies keep their base X position but sway
-      dummy.cx = dummy.baseCX + swayX;
-      dummy.cy = FLOOR;
-    } else {
-      // Center dummy also dances
-      dummy.cx = CX + swayX * 0.5;
-      dummy.cy = FLOOR;
-    }
-    
-    // Standup recovery: count down knockdown timer (0.25s = 15 frames), then infinite standup
-    // Applied to center dummy OR if side dummy has no active standup timer
-    let isOnStandup = di === mainDummyIndex;
-    if (isOnStandup && standupTimer > 0) { standupTimer--; }
-    if (isOnStandup ? (standupTimer <= 0) : true) { // All side dummies always standing
-      // Standup: pull all nodes toward current dancing position
-      const pull = 0.08;
-      const cy = dummy.cy;
-      const cx = dummy.cx;
-      const danceTime = Date.now() * 0.002 + di * 1.3;
-      const armSway = Math.sin(danceTime * 1.5) * 20;
-      dummy.head.y   += (cy - 200 - dummy.head.y) * pull;
-      dummy.neck.y   += (cy - 175 - dummy.neck.y) * pull * 0.4;
-      dummy.chest.y  += (cy - 140 - dummy.chest.y) * pull;
-      dummy.belly.y  += (cy - 105 - dummy.belly.y) * pull;
-      dummy.hip.y    += (cy - 70  - dummy.hip.y)   * pull;
-      dummy.head.x   += (cx - dummy.head.x) * pull * 0.4;
-      dummy.chest.x  += (cx - dummy.chest.x) * pull * 0.3;
-      dummy.hip.x    += (cx - dummy.hip.x)   * pull * 0.3;
-      // Feet on ground
-      dummy.lFoot.y  += (cy - dummy.lFoot.y) * pull * 0.6;
-      dummy.rFoot.y  += (cy - dummy.rFoot.y) * pull * 0.6;
-      dummy.lFoot.x  += (cx - 28 - dummy.lFoot.x) * pull * 0.4;
-      dummy.rFoot.x  += (cx + 28 - dummy.rFoot.x) * pull * 0.4;
-      dummy.lKnee.y  += (cy - 35 - dummy.lKnee.y) * pull * 0.5;
-      dummy.rKnee.y  += (cy - 35 - dummy.rKnee.y) * pull * 0.5;
-      // Arms sway with dance
-      dummy.lShoulder.x += (cx - 35 - dummy.lShoulder.x) * pull * 0.3;
-      dummy.rShoulder.x += (cx + 35 - dummy.rShoulder.x) * pull * 0.3;
-      dummy.lHand.x  += (cx - 85 + armSway - dummy.lHand.x) * pull * 0.25;
-      dummy.rHand.x  += (cx + 85 + armSway - dummy.rHand.x) * pull * 0.25;
-      dummy.lHand.y  += (cy - 90 - armSway * 0.5 - dummy.lHand.y) * pull * 0.2;
-      dummy.rHand.y  += (cy - 90 + armSway * 0.5 - dummy.rHand.y) * pull * 0.2;
-      dummy.lHip.x   += (cx - 18 - dummy.lHip.x) * pull * 0.3;
-      dummy.rHip.x   += (cx + 18 - dummy.rHip.x) * pull * 0.3;
-    }
-  }
-}
-
-function applyConstraints() {
-  for (const dummy of dummies) {
-    const nodes = Object.entries(dummy).filter(([k]) => k!=='cx' && k!=='cy' && k!=='baseCX' && k!=='armAnimOffset' && k!=='health').map(([,v]) => v);
-    for (let i = 0; i < 5; i++) {
-      for (const [a, b, len] of CONSTRAINTS) constrain(dummy[a], dummy[b], len);
-      for (const n of nodes) {
-        // Floor boundary (with bounce)
-        if (n.y > FLOOR) {
-          n.y = FLOOR;
-          n.py = n.y + (n.y - n.py) * 0.2; // Reduced bounce
-        }
-        // Ceiling boundary
-        if (n.y < 40) {
-          n.y = 40;
-          n.py = n.y - (n.py - n.y) * 0.5;
-        }
-        // Left wall boundary
-        if (n.x < 10) {
-          n.x = 10;
-          n.px = n.x + (n.x - n.px) * 0.3;
-        }
-        // Right wall boundary
-        if (n.x > canvas.width - 10) {
-          n.x = canvas.width - 10;
-          n.px = n.x - (n.px - n.x) * 0.3;
-        }
-      }
-    }
-  }
-}
-
-// ─── PENDING EFFECTS (delayed weapon animations) ────────────────────────────
-function triggerWeapon(wx, wy, weapon) {
-  // Animation delays for each weapon type
-  const DELAYED = {
-    explosion: 70, shock: 22, bullet: 14,
-    hit: 20,      // punch, hammer, axe, pickaxe, wrench, guitar, reaper
-    spin: 30,     // ball, boomer, tornado
-    pull: 25,     // magnet
-    falling_ball: 40,
-    wave_attack: 35,
-    axe_throw: 25,    // Axe flies to target then sticks
-    embed: 25,         // Hammer/Pickaxe/Wrench/Reaper fly to target then stick
-    boomerang: 90,    // Boomerang flies across screen and back
-    rocket_fly: 120,    // Rocket flies across screen
-    meteor_slam: 180,   // Meteor slowly descends
-    pizza_rats: 200,    // Pizza rats attack over time
-    crusher: 1,         // Crusher triggers immediately (it runs itself)
-  };
-  const delay = DELAYED[weapon.type];
-  if (delay !== undefined) {
-    pendingEffects.push({ wx, wy, weapon, timer: delay, maxTimer: delay });
-  } else {
-    applyWeapon(wx, wy, weapon);
-  }
-}
-
-function updatePendingEffects() {
-  for (let i = pendingEffects.length - 1; i >= 0; i--) {
-    const e = pendingEffects[i];
-    e.timer--;
-    // Spawn fuse sparks while counting down
-    if (e.weapon.type === "explosion" && e.timer > 0 && Math.random() < 0.6) {
-      particles.push({
-        x: e.wx + (Math.random()-0.5)*8, y: e.wy - 18 + (Math.random()-0.5)*6,
-        vx: (Math.random()-0.5)*2, vy: -Math.random()*2,
-        life: 0.6, color: Math.random()<0.5 ? "#ff9f43" : "#fff", size: 3
+    function worldForLevel(level) { return Math.floor((level - 1) / 5); }
+    function levelInWorld(level) { return ((level - 1) % 5) + 1; }
+    const levelSignatures = [
+      "snowdrift", "icepatch", "icicle", "whiteout", "crystal",
+      "flame", "butter", "pan", "steam", "water",
+      "spark", "ember", "flame", "lava", "firestorm",
+      "coal", "smokering", "lowSmoke", "smokepillar", "smokefinale",
+      "plate", "foot", "palm", "stomp", "hand"
+    ];
+    const obstacleProfiles = [
+      [1.65, 1.45], [0.78, 0.72], [1.3, 1.1], [0.7, 0.68], [1.5, 1.35],
+      [0.82, 0.76], [1.45, 1.2], [0.72, 0.7], [1.2, 1.05], [0.62, 1.75],
+      [1.55, 1.4], [0.8, 0.72], [1.25, 1.08], [0.68, 0.62], [1.45, 1.25],
+      [0.86, 0.78], [1.35, 1.15], [0.74, 0.68], [1.15, 1.0], [0.6, 0.55],
+      [1.6, 1.4], [0.8, 0.7], [1.25, 1.05], [0.7, 0.62], [1.35, 1.15]
+    ];
+    function signatureForLevel(level) { return levelSignatures[level - 1]; }
+    function obstacleProfileForLevel(level) { return obstacleProfiles[level - 1] || [1, 1]; }
+    function renderLevelLocks() {
+      [...levelButtons.querySelectorAll("button")].forEach((button, index) => {
+        const level = index + 1;
+        button.hidden = worldForLevel(level) !== selectedWorld;
+        button.disabled = level > unlockedLevel;
+        button.title = button.disabled ? "Finish the previous level to unlock this course." : "Play this course";
       });
     }
-    if (e.timer <= 0) {
-      applyWeapon(e.wx, e.wy, e.weapon);
-      // Extra big flash for explosions
-      if (e.weapon.type === "explosion") {
-        spawnParticles(e.wx, e.wy, "#fff", 15);
-        spawnParticles(e.wx, e.wy, "#ff9f43", 30);
+    function unlockNextLevel() {
+      if (!isDaily && selectedLevel === unlockedLevel && unlockedLevel < worlds.length * 5) {
+        unlockedLevel += 1;
+        localStorage.setItem("drive-pig-unlocked-level", String(unlockedLevel));
+        renderLevelLocks();
       }
-      pendingEffects.splice(i, 1);
     }
-  }
-}
-
-function drawPendingEffects() {
-  for (const e of pendingEffects) {
-    const prog = 1 - e.timer / e.maxTimer; // 0 → 1 as time passes
-    const { name } = e.weapon;
-
-    if (e.weapon.type === "rocket_fly") {
-      // Rocket seeks the nearest dummy — launches from off-screen left, homes in
-      // Find nearest dummy target (cached when effect was created)
-      if (!e.rocketTarget) {
-        let bestDist = Infinity;
-        for (let di = 0; di < dummies.length; di++) {
-          const dist = Math.hypot(dummies[di].chest.x - e.wx, dummies[di].chest.y - e.wy);
-          if (dist < bestDist) { bestDist = dist; e.rocketTargetIdx = di; }
-        }
-        e.rocketTarget = true;
-        e.rocketX = -60;
-        e.rocketY = canvas.height * 0.15;
-      }
-      const target = dummies[e.rocketTargetIdx];
-      const tx = target.chest.x, ty = target.chest.y;
-      // Smooth steer rocket toward target
-      const seekProg = Math.min(prog * 1.4, 1);
-      const rocketX = e.rocketX = e.rocketX + (tx - e.rocketX) * 0.04 * (1 + seekProg);
-      const rocketY = e.rocketY = e.rocketY + (ty - e.rocketY) * 0.04 * (1 + seekProg);
-      const angle = Math.atan2(ty - rocketY, tx - rocketX);
-
-      // Check for contact with target dummy — explode on hit
-      const distToTarget = Math.hypot(rocketX - tx, rocketY - ty);
-      if (distToTarget < 35 && prog > 0.05) {
-        spawnParticles(rocketX, rocketY, "#ff4d6d", 30);
-        spawnParticles(rocketX, rocketY, "#ffd700", 20);
-        spawnParticles(rocketX, rocketY, "#fff", 10);
-        for (let di = 0; di < dummies.length; di++) {
-          const dnodes = Object.values(dummies[di]).filter(v => v && typeof v.x === 'number');
-          for (const n of dnodes) {
-            const dx = n.x - rocketX, dy = n.y - rocketY;
-            const d = Math.hypot(dx, dy) || 1;
-            if (d < 120) {
-              const str = (1 - d/120) * 20;
-              n.x += (dx/d) * str; n.y += (dy/d) * str;
-            }
-          }
-          if (Math.hypot(dummies[di].chest.x - rocketX, dummies[di].chest.y - rocketY) < 120)
-            dummies[di].health -= 80;
-        }
-        e.timer = 0; // End effect immediately
-        updateDamageDisplay();
-        continue;
-      }
-
-      ctx.save();
-      ctx.translate(rocketX, rocketY);
-      ctx.rotate(angle + Math.PI / 2);
-      // Rocket body
-      ctx.fillStyle = "#ff4d6d";
-      ctx.fillRect(-6, -20, 12, 40);
-      // Nose cone
-      ctx.fillStyle = "#ffd700";
-      ctx.beginPath(); ctx.moveTo(-6, -20); ctx.lineTo(0, -28); ctx.lineTo(6, -20); ctx.fill();
-      // Fins
-      ctx.fillStyle = "#ff6b6b";
-      ctx.beginPath(); ctx.moveTo(-6, 15); ctx.lineTo(-18, 20); ctx.lineTo(-8, 18); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(6, 15); ctx.lineTo(18, 20); ctx.lineTo(8, 18); ctx.fill();
-      // Flame trail
-      ctx.fillStyle = "rgba(255,107,53,0.6)";
-      for (let i = 0; i < 3; i++) {
-        ctx.beginPath(); ctx.arc(0, 20 + i*8 + Math.sin(Date.now()*0.01)*3, 5-i, 0, Math.PI*2); ctx.fill();
-      }
-      ctx.restore();
-      
-      // Apply AoE damage to all dummies near rocket
-      if (prog > 0.1 && prog < 0.99) {
-        for (let di = 0; di < dummies.length; di++) {
-          const dnodes = Object.values(dummies[di]).filter(v => v && typeof v.x === 'number');
-          for (const n of dnodes) {
-            const dx = n.x - rocketX;
-            const dy = n.y - rocketY;
-            const d = Math.hypot(dx, dy);
-            if (d < 80) {
-              const strength = (1 - d / 80) * 8;
-              n.x += (dx/d || 0) * strength;
-              n.y += (dy/d || 0) * strength * 1.2;
-              dummies[di].health -= 0.4;
-            }
-          }
+    function addWorldHazards(worldIndex, level, ground, end) {
+      const world = worlds[worldIndex];
+      const difficulty = levelInWorld(level);
+      const [sharedMultiplier, signatureMultiplier] = obstacleProfileForLevel(level);
+      if (world.hazard !== "hand") {
+        const spacing = Math.max(segment * 2.4, segment * (4.2 - difficulty * .18) * sharedMultiplier);
+        let icicleIndex = 0;
+        for (let x = segment * 12; x < end - segment * 4; x += spacing) {
+          const hazard = { x, type: world.hazard, phase: (x / segment) % 2, difficulty };
+          if (world.hazard === "icicle") hazard.requiresSquat = icicleIndex++ % 2 === 1;
+          if (world.hazard === "butter" && difficulty !== 3 && difficulty !== 5) hazard.gap = terrainAt(x) - 220;
+          if (world.hazard === "fireball") hazard.y = ground - 85 - ((x / segment) % 3) * 38;
+          if (world.hazard === "scythe") hazard.y = terrainAt(x) - 78;
+          if (world.hazard === "smoke") hazard.y = ground - 10;
+          if (world.hazard !== "butter" || (difficulty !== 3 && difficulty !== 5)) hazards.push(hazard);
+          if (world.hazard === "butter") hazards.push({ x: x + spacing * .5, type: "vent", phase: (x / segment) % 3, difficulty });
         }
       }
+      const signature = signatureForLevel(level);
+      const signatureSpacing = Math.max(segment * 3.2, segment * (5.6 - difficulty * .25) * signatureMultiplier);
+      for (let x = segment * 15; x < end - segment * 3; x += signatureSpacing) {
+        hazards.push({ x, type: "signature", signature, phase: (x / segment) % 4, difficulty });
+      }
+    }
 
-    } else if (e.weapon.type === "meteor_slam") {
-      // Meteor flies from top-left toward the clicked point
-      const meteorX = -200 + prog * (e.wx + 200);
-      const meteorY = -200 + prog * (e.wy + 200);
-      const meteorSize = 80 + Math.sin(Date.now() * 0.002) * 15;
-      
-      ctx.save();
-      // Meteor body
-      ctx.fillStyle = "#ff9f43";
-      ctx.shadowColor = "rgba(255, 107, 53, 0.8)"; ctx.shadowBlur = 30;
-      ctx.beginPath(); ctx.arc(meteorX, meteorY, meteorSize, 0, Math.PI*2); ctx.fill();
-      // Crater cracks
-      ctx.strokeStyle = "rgba(200, 80, 30, 0.7)"; ctx.lineWidth = 3;
-      for (let i = 0; i < 4; i++) {
-        const angle = (Math.PI * 2 / 4) * i;
-        ctx.beginPath(); ctx.moveTo(meteorX, meteorY);
-        ctx.lineTo(meteorX + Math.cos(angle) * meteorSize, meteorY + Math.sin(angle) * meteorSize);
-        ctx.stroke();
+    function buildCourse(level, dailyMode) {
+      const worldIndex = worldForLevel(level), world = worlds[worldIndex];
+      const ground = Math.round(innerHeight * .72), random = dailyMode ? seededRandom(seedForToday()) : null;
+      terrain = [{ x: 0, y: ground }]; hazards = []; let x = 0;
+      x = flat(x, ground, 8);
+      const count = dailyMode ? 11 : level === 1 ? 5 : 5 + levelInWorld(level) * 2 + worldIndex;
+      for (let index = 0; index < count; index++) {
+        const patternIndex = dailyMode
+          ? Math.floor(random() * patterns.length)
+          : level === 1 ? (index % 2 === 0 ? 0 : 3) : (level + index * 2) % patterns.length;
+        x = patterns[patternIndex](x, ground);
+        x = flat(x, ground, dailyMode ? 1 : 2);
       }
-      // Glow
-      ctx.fillStyle = `rgba(255, 165, 0, ${0.4 - prog * 0.2})`;
-      ctx.beginPath(); ctx.arc(meteorX, meteorY, meteorSize + 40, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-      
-      // Apply heavy AoE damage to all dummies as meteor passes through
-      if (prog > 0.1) {
-        for (let di = 0; di < dummies.length; di++) {
-          const dnodes = Object.values(dummies[di]).filter(v => v && typeof v.x === 'number');
-          for (const n of dnodes) {
-            const dx = n.x - meteorX;
-            const dy = n.y - meteorY;
-            const d = Math.hypot(dx, dy);
-            if (d < meteorSize + 100) {
-              const strength = (1 - d / (meteorSize + 100)) * 15;
-              n.y += strength * 1.5;
-              dummies[di].health -= 0.3;
-            }
-          }
-        }
-      }
+      x = flat(x, ground, 9); finish = x - segment * 3;
+      addWorldHazards(worldIndex, level, ground, finish);
+      courseName = dailyMode ? `DAILY CHALLENGE: ${localDayKey()}` : `${world.name} ${levelInWorld(level)}: ${world.levels[levelInWorld(level) - 1]}`;
+      car = { x: segment * 3, y: ground - 26, vx: 0, vy: 0, angle: 0, spin: 0, squat: false, grounded: true, crashed: false, won: false };
+      cameraX = 0;
+      jumpQueued = false;
+      bossTimer = 0;
+    }
 
-    } else if (e.weapon.type === "pizza_rats") {
-      // Draw pizza on dummy's head and render swarming rats
-      if (pizzaPos) {
-        ctx.save();
-        ctx.fillStyle = "#e8a241";
-        ctx.beginPath(); ctx.moveTo(pizzaPos.x - 20, pizzaPos.y); 
-        ctx.lineTo(pizzaPos.x + 20, pizzaPos.y);
-        ctx.lineTo(pizzaPos.x + 10, pizzaPos.y + 30); 
-        ctx.closePath();
-        ctx.fill();
-        // Toppings
-        ctx.fillStyle = "#e74c3c";
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath(); ctx.arc(pizzaPos.x + (Math.random()-0.5)*25, pizzaPos.y + Math.random()*20 + 5, 3, 0, Math.PI*2); ctx.fill();
-        }
-        ctx.restore();
+    function terrainAt(x) {
+      if (x <= terrain[0].x) return terrain[0].y;
+      for (let index = 0; index < terrain.length - 1; index++) { const first = terrain[index], second = terrain[index + 1]; if (x <= second.x) { const amount = (x - first.x) / (second.x - first.x); return first.y + (second.y - first.y) * amount; } }
+      return terrain[terrain.length - 1].y;
+    }
+    function normalizeAngle(angle) { return Math.atan2(Math.sin(angle), Math.cos(angle)); }
+    function slopeAt(x) { return Math.atan2(terrainAt(x + 22) - terrainAt(x - 22), 44); }
+    function startGame() {
+      if (!isDaily && selectedLevel > unlockedLevel) {
+        message.textContent = "Finish the previous level to unlock this course.";
+        return;
       }
-      
-      // Update and draw rats
-      for (let i = rats.length - 1; i >= 0; i--) {
-        const rat = rats[i];
-        rat.life--;
-        if (rat.life <= 0) {
-          rats.splice(i, 1);
-          continue;
-        }
-        
-        // Move toward target or pizza
-        if (pizzaPos && Math.hypot(rat.x - pizzaPos.x, rat.y - pizzaPos.y) < 30) {
-          rat.hit = true;
-          dummies[pizzaTargetDummyIdx].health -= 0.5; // Rat damages dummy while eating pizza
-        } else if (!rat.hit) {
-          const dx = rat.targetX - rat.x;
-          const dy = rat.targetY - rat.y;
-          const d = Math.hypot(dx, dy);
-          if (d > 1) {
-            rat.x += (dx / d) * rat.speed;
-            rat.y += (dy / d) * rat.speed;
+      buildCourse(selectedLevel, isDaily); playing = true; overlay.classList.add("hidden"); topbar.classList.remove("hidden"); levelLabel.textContent = courseName; updateCountdown();
+    }
+    function showMenu(text) { playing = false; topbar.classList.add("hidden"); overlay.classList.remove("hidden"); message.textContent = text; play.textContent = "Play selected level"; }
+
+    function crash(text) {
+      if (car.crashed || car.won) return;
+      car.crashed = true;
+      setTimeout(() => showMenu(text), 850);
+    }
+
+    function checkHazards(view) {
+      const world = worlds[worldForLevel(selectedLevel)];
+      const carScreenX = car.x - view;
+      for (const hazard of hazards) {
+        if (hazard.type === "icicle") {
+          const icicleTip = terrainAt(hazard.x) - 80;
+          const carTop = car.y - 25, carBottom = car.y + 25;
+          const touchesIcicle = Math.abs(car.x - hazard.x) < 30 && carTop < icicleTip && carBottom > 0;
+          if (touchesIcicle && (!hazard.requiresSquat || !car.squat)) crash(hazard.requiresSquat ? "Squat under this icicle!" : "The icicles got the pig car. Pick a course and try again.");
+        } else if (hazard.type === "butter") {
+          const localGround = terrainAt(hazard.x), upperBottom = hazard.gap + 16, lowerTop = hazard.gap + 204;
+          const hitsUpperColumn = car.y - 18 < upperBottom;
+          const hasLowerColumn = lowerTop < localGround - 24;
+          const hitsLowerColumn = hasLowerColumn && car.y + 18 > lowerTop;
+          if (Math.abs(car.x - hazard.x) < 18 && (hitsUpperColumn || hitsLowerColumn)) crash("Splat. The butter columns closed the gap.");
+        } else if (hazard.type === "fireball") {
+          const y = hazard.y + Math.sin((performance.now() / 240) + hazard.phase) * 14;
+          if (Math.hypot(car.x - hazard.x, car.y - y) < 34) crash("A fireball hit the pig car. Pick a course and try again.");
+        } else if (hazard.type === "scythe") {
+          const y = terrainAt(hazard.x) - 78;
+          if (Math.hypot(car.x - hazard.x, car.y - y) < 48) crash("The reaper's scythe caught the pig car.");
+        } else if (hazard.type === "smoke") {
+          const y = terrainAt(hazard.x) - 12;
+          if (Math.abs(car.x - hazard.x) < 52 && car.y + 20 > y) crash("The smoke pit swallowed the pig car.");
+        } else if (hazard.type === "signature") {
+          const signatureHeights = { snowdrift: 24, icepatch: 8, whiteout: 58, crystal: 72, flame: 48, pan: 42, steam: 52, water: 18, spark: 34, ember: 24, lava: 38, firestorm: 62, coal: 22, smokering: 48, lowSmoke: 28, smokepillar: 64, smokefinale: 44, plate: 30, foot: 70, palm: 58, stomp: 42, hand: 90 };
+          const obstacleHeight = signatureHeights[hazard.signature] || 30;
+          const obstacleY = terrainAt(hazard.x) - obstacleHeight;
+          const requiresSquat = hazard.signature === "whiteout" || hazard.signature === "smokepillar";
+          let touches;
+          if (hazard.signature === "water") {
+            const poolAngle = slopeAt(hazard.x), dx = car.x - hazard.x, dy = car.y - (terrainAt(hazard.x) - 10);
+            const localX = dx * Math.cos(poolAngle) + dy * Math.sin(poolAngle);
+            const localY = -dx * Math.sin(poolAngle) + dy * Math.cos(poolAngle);
+            touches = Math.abs(localX) < 42 && Math.abs(localY) < 18;
           } else {
-            const pizzaDummy = dummies[pizzaTargetDummyIdx];
-            rat.targetX = pizzaDummy.head.x + (Math.random() - 0.5) * 60;
-            rat.targetY = pizzaDummy.head.y + (Math.random() - 0.5) * 60;
+            touches = Math.abs(car.x - hazard.x) < 26 && car.y + 20 > obstacleY && car.y - 20 < terrainAt(hazard.x);
           }
-          // Damage dummy when near
-          const pizzaDummy = dummies[pizzaTargetDummyIdx];
-          const dummyDist = Math.hypot(rat.x - pizzaDummy.chest.x, rat.y - pizzaDummy.chest.y);
-          if (dummyDist < 40) pizzaDummy.health -= 0.2;
-        }
-        
-        // Draw rat
-        ctx.save();
-        ctx.fillStyle = "rgba(80, 80, 80, 0.8)";
-        ctx.beginPath(); ctx.ellipse(rat.x, rat.y, 6, 4, 0, 0, Math.PI*2); ctx.fill();
-        // Eyes
-        ctx.fillStyle = "rgba(255, 0, 0, 0.9)";
-        ctx.beginPath(); ctx.arc(rat.x - 2, rat.y - 1, 1.5, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rat.x + 2, rat.y - 1, 1.5, 0, Math.PI*2); ctx.fill();
-        // Tail
-        ctx.strokeStyle = "rgba(80, 80, 80, 0.6)"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(rat.x - 6, rat.y);
-        ctx.quadraticCurveTo(rat.x - 12 + Math.sin(Date.now()*0.02)*4, rat.y - 3, rat.x - 14, rat.y - 5);
-        ctx.stroke();
-        ctx.restore();
-      }
-
-    } else if (e.weapon.type === "explosion") {
-      // Bomb: black circle with pulsing fuse ring
-      const pulse = 0.6 + 0.4 * Math.sin(Date.now() * 0.03);
-      ctx.save();
-      // Body
-      ctx.fillStyle = "#222";
-      ctx.beginPath(); ctx.arc(e.wx, e.wy, 18, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = "#555"; ctx.lineWidth = 2;
-      ctx.stroke();
-      // Fuse line (gets shorter as timer counts down)
-      const fuseLen = 22 * (1 - prog);
-      ctx.strokeStyle = "#c8a96e"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(e.wx + 10, e.wy - 14);
-      ctx.lineTo(e.wx + 10 + fuseLen * 0.6, e.wy - 14 - fuseLen); ctx.stroke();
-      // Fuse spark
-      ctx.fillStyle = `rgba(255,200,0,${pulse})`;
-      ctx.beginPath();
-      ctx.arc(e.wx + 10 + fuseLen*0.6, e.wy - 14 - fuseLen, 5*pulse, 0, Math.PI*2);
-      ctx.fill();
-      // Warning ring grows as it gets closer to detonation
-      ctx.strokeStyle = `rgba(255,80,0,${prog * 0.7})`;
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(e.wx, e.wy, e.weapon.radius * prog, 0, Math.PI*2); ctx.stroke();
-      ctx.restore();
-
-    } else if (e.weapon.type === "shock") {
-      // Lightning bolt from top of screen to click point
-      ctx.save();
-      ctx.strokeStyle = `rgba(248,231,28,${1 - prog})`;
-      ctx.lineWidth = 3 + (1-prog)*4;
-      ctx.shadowColor = "#f8e71c"; ctx.shadowBlur = 18;
-      ctx.beginPath();
-      let lx = e.wx, ly = 0;
-      ctx.moveTo(lx, ly);
-      const steps = 8;
-      for (let s = 1; s <= steps; s++) {
-        lx += (Math.random()-0.5) * 40;
-        ly = (e.wy / steps) * s;
-        ctx.lineTo(lx, ly);
-      }
-      ctx.lineTo(e.wx, e.wy);
-      ctx.stroke();
-      // Glow circle at hit point
-      ctx.fillStyle = `rgba(248,231,28,${(1-prog)*0.5})`;
-      ctx.beginPath(); ctx.arc(e.wx, e.wy, 30*(1-prog), 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-    } else if (e.weapon.type === "bullet") {
-      // Fast bullet trail moving from left edge to click
-      const bx = e.wx * prog;
-      const by = e.wy;
-      ctx.save();
-      ctx.fillStyle = "#a8dadc";
-      ctx.beginPath(); ctx.arc(bx, by, 5, 0, Math.PI*2); ctx.fill();
-      // Trail
-      ctx.strokeStyle = "rgba(168,218,220,0.4)"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, by); ctx.lineTo(bx, by); ctx.stroke();
-      ctx.restore();
-    } else if (e.weapon.type === "falling_ball") {
-      // Ball falls from top of screen
-      const by = e.wy * prog;
-      ctx.save();
-      ctx.fillStyle = "#457b9d";
-      ctx.beginPath(); ctx.arc(e.wx, by, 14, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = "#2a6df5"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(e.wx, by, 10, 0, Math.PI*2); ctx.stroke();
-      // Trail
-      ctx.strokeStyle = "rgba(42,109,245,0.3)"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(e.wx, 0); ctx.lineTo(e.wx, by); ctx.stroke();
-      ctx.restore();
-
-    } else if (e.weapon.type === "wave_attack") {
-      // Wave travels from left to right
-      const waveX = e.wx * prog;
-      ctx.save();
-      ctx.strokeStyle = `rgba(72,202,228,${1 - prog})`;
-      ctx.lineWidth = 3;
-      // Draw wave form
-      ctx.beginPath();
-      for (let y = canvas.height * 0.2; y < canvas.height * 0.8; y += 15) {
-        const offset = Math.sin((y - e.wy) * 0.05 + Date.now() * 0.01) * 20;
-        ctx.lineTo(waveX + offset, y);
-      }
-      ctx.stroke();
-      // Wave crest glow
-      ctx.fillStyle = `rgba(72,202,228,${(1-prog)*0.4})`;
-      ctx.beginPath(); ctx.arc(waveX, e.wy, 60*(1-prog), 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-
-    } else if (e.weapon.type === "hit") {
-      // Weapon travels to target, spinning/moving
-      const sx = canvas.width / 2 + (Math.random()-0.5)*50;
-      const sy = canvas.height / 2;
-      const x = sx + (e.wx - sx) * prog;
-      const y = sy + (e.wy - sy) * prog;
-      const spin = prog * Math.PI * 3;
-
-      ctx.save(); ctx.translate(x, y); ctx.rotate(spin);
-      // Draw weapon based on name
-      if (name.includes("Punch")) {
-        ctx.fillStyle = "#f4a261"; ctx.fillRect(-8, -6, 16, 12);
-      } else if (name.includes("Hammer")) {
-        ctx.fillStyle = "#8b4513"; ctx.fillRect(-3, -18, 6, 18);
-        ctx.fillStyle = "#e76f51"; ctx.fillRect(-12, -18, 24, 8);
-      } else if (name.includes("Axe")) {
-        ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -15, 4, 15);
-        ctx.fillStyle = "#e9c46a"; ctx.beginPath(); ctx.moveTo(0,-15); ctx.lineTo(12,-10); ctx.lineTo(8,-5); ctx.lineTo(-4,-10); ctx.fill();
-      } else if (name.includes("Pickaxe")) {
-        ctx.fillStyle = "#adb5bd"; ctx.fillRect(-2, -14, 4, 14);
-        ctx.fillStyle = "#808080"; ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(-10,-6); ctx.lineTo(-6,-10); ctx.lineTo(6,-10); ctx.lineTo(10,-6); ctx.fill();
-      } else if (name.includes("Wrench")) {
-        ctx.fillStyle = "#ced4da"; ctx.beginPath(); ctx.arc(0,-3,7,0,Math.PI*2); ctx.fill(); ctx.fillRect(-2,3,4,10);
-      } else if (name.includes("Guitar")) {
-        ctx.fillStyle = "#a29bfe"; ctx.beginPath(); ctx.ellipse(0,-2,8,12,0,0,Math.PI*2); ctx.fill();
-        ctx.strokeStyle = "#6c5ce7"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6,6); ctx.lineTo(6,6); ctx.stroke();
-      } else if (name.includes("Reaper")) {
-        ctx.fillStyle = "#8b4513"; ctx.fillRect(-2,-20,4,20);
-        ctx.fillStyle = "#6c757d"; ctx.beginPath(); ctx.moveTo(0,-20); ctx.lineTo(16,-16); ctx.quadraticCurveTo(18,-20,16,-24); ctx.lineTo(0,-20); ctx.fill();
-      }
-      ctx.restore();
-
-    } else if (e.weapon.type === "spin") {
-      // Spinning projectile traveling to target
-      const sx = canvas.width / 2;
-      const sy = canvas.height / 2;
-      const x = sx + (e.wx - sx) * prog;
-      const y = sy + (e.wy - sy) * prog;
-      const spin = prog * Math.PI * 6;
-
-      ctx.save(); ctx.translate(x, y); ctx.rotate(spin);
-      if (name.includes("Ball")) {
-        ctx.fillStyle = "#457b9d"; ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = "#2a6df5"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.stroke();
-      } else if (name.includes("Boomer")) {
-        ctx.fillStyle = "#f7b731"; ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = "#e8a600"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
-      } else if (name.includes("Tornado")) {
-        for (let i = 0; i < 5; i++) {
-          ctx.strokeStyle = `rgba(144,224,239,${0.6 - i*0.1})`; ctx.lineWidth = 3-i;
-          ctx.beginPath(); ctx.arc(0, 0, 15+i*8, 0, Math.PI*2); ctx.stroke();
+          if (touches && (!requiresSquat || !car.squat)) crash("The " + hazard.signature + " obstacle caught the pig car.");
         }
       }
-      ctx.restore();
-
-    } else if (e.weapon.type === "embed") {
-      // Hammer/Pickaxe/Wrench/Reaper fly toward target, spinning, then stick in dummy
-      const sx = canvas.width / 2, sy = canvas.height / 2;
-      const x = sx + (e.wx - sx) * prog;
-      const y = sy + (e.wy - sy) * prog;
-      const spin = prog * Math.PI * 4;
-      ctx.save(); ctx.translate(x, y); ctx.rotate(spin);
-      const wname = e.weapon.name;
-      if (wname.includes('Hammer')) {
-        ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -18, 4, 18);
-        ctx.fillStyle = "#e76f51"; ctx.fillRect(-10, -18, 20, 8);
-      } else if (wname.includes('Pickaxe')) {
-        ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -14, 4, 14);
-        ctx.fillStyle = "#adb5bd";
-        ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(-10,-6); ctx.lineTo(-6,-10); ctx.lineTo(6,-10); ctx.lineTo(10,-6); ctx.fill();
-      } else if (wname.includes('Wrench')) {
-        ctx.fillStyle = "#ced4da";
-        ctx.beginPath(); ctx.arc(0,-8,7,0,Math.PI*2); ctx.fill();
-        ctx.fillRect(-2, -1, 4, 16);
-        ctx.beginPath(); ctx.arc(0,15,5,0,Math.PI*2); ctx.fill();
-      } else if (wname.includes('Reaper')) {
-        ctx.fillStyle = "#555"; ctx.fillRect(-2,-22,4,22);
-        ctx.fillStyle = "#6c757d";
-        ctx.beginPath(); ctx.moveTo(0,-22); ctx.lineTo(18,-16); ctx.quadraticCurveTo(20,-22,18,-26); ctx.lineTo(0,-22); ctx.fill();
+      if (world.hazard === "hand" && levelInWorld(selectedLevel) === 5) {
+        const cycle = 240, phase = bossTimer % cycle, side = Math.floor(bossTimer / cycle) % 2;
+        const handX = side === 0 ? 86 : innerWidth - 86;
+        const slamY = phase < 48 ? -170 + phase / 48 * (innerHeight * .62) : phase < 84 ? innerHeight * .62 : -170;
+        if (phase < 84 && Math.abs(carScreenX - handX) < 105 && car.y < slamY + 150) crash("The giant hand slammed the pig car.");
       }
-      ctx.restore();
+    }
 
-    } else if (e.weapon.type === "axe_throw") {
-      // Axe flies from center-screen toward click, spins
-      const sx = canvas.width / 2, sy = canvas.height / 2;
-      const x = sx + (e.wx - sx) * prog;
-      const y = sy + (e.wy - sy) * prog;
-      const spin = prog * Math.PI * 4;
-      ctx.save(); ctx.translate(x, y); ctx.rotate(spin);
-      ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -15, 4, 15);
-      ctx.fillStyle = "#e9c46a";
-      ctx.beginPath(); ctx.moveTo(0,-15); ctx.lineTo(12,-10); ctx.lineTo(8,-5); ctx.lineTo(-4,-10); ctx.fill();
-      ctx.restore();
+    function update() {
+      if (!playing || car.crashed || car.won) return;
+      const forward = keys.has("ArrowRight") || keys.has("KeyD"), backward = keys.has("ArrowLeft") || keys.has("KeyA");
+      const squat = keys.has("ArrowDown") || keys.has("KeyS");
+      const groundBeforeMove = terrainAt(car.x) - 13;
+      const touchingGround = car.grounded || car.y >= groundBeforeMove - 12;
+      if (jumpQueued && touchingGround) { car.vy = -8.6; car.grounded = false; }
+      jumpQueued = false;
+      car.squat = squat;
+      if (forward) car.vx += .18;
+      if (backward) car.vx -= .10;
+      car.vx *= .992; car.vx = Math.max(-4, Math.min(9.5, car.vx));
+      car.vy += .28; car.x += car.vx; car.y += car.vy;
+      const front = terrainAt(car.x + 22) - 13, rear = terrainAt(car.x - 22) - 13, ground = (front + rear) / 2;
+      if (car.y >= ground) {
+        const target = Math.atan2(front - rear, 44);
+        const landingTilt = Math.abs(normalizeAngle(car.angle - target));
+        if (landingTilt > 2.35) crash("The pig car landed off its wheels. Try another flip.");
+        car.y = ground; car.vy = 0; car.angle = target; car.spin = 0; car.grounded = true;
+      }
+      else {
+        car.grounded = false;
+        if (forward) car.spin += .014;
+        if (backward) car.spin -= .014;
+        car.spin = Math.max(-.14, Math.min(.14, car.spin));
+        car.angle += car.spin;
+      }
+      cameraX += (Math.max(0, car.x - innerWidth * .31) - cameraX) * .08;
+      bossTimer += worlds[worldForLevel(selectedLevel)].hazard === "hand" ? 1 : 0;
+      checkHazards(cameraX);
+      if (car.y > innerHeight + 200 || car.x < 20) crash("That landing scrambled the pig car. Pick a course and try again.");
+      if (car.x >= finish) { car.won = true; unlockNextLevel(); setTimeout(() => showMenu(isDaily ? "Daily challenge cleared. Come back tomorrow for a new course." : unlockedLevel > selectedLevel ? "Level cleared. The next course is unlocked." : "Level cleared. Choose another course, or take on today’s challenge."), 700); }
+    }
 
-    } else if (e.weapon.type === "boomerang") {
-      // Flies left→right above dummies then arcs back from right, dealing damage along path
-      // Phase 1 (prog 0→0.5): travel from left off-screen to right off-screen, above heads
-      // Phase 2 (prog 0.5→1): arc back from right, sweeping down to click target
-      const headHeight = FLOOR - 230; // above dummies' heads
-      let bx, by;
-      if (prog < 0.5) {
-        const t = prog / 0.5; // 0→1
-        bx = -40 + t * (canvas.width + 80);
-        by = headHeight - Math.sin(t * Math.PI) * 60;
+    function draw() {
+      const world = worlds[worldForLevel(selectedLevel)], view = cameraX, ground = Math.round(innerHeight * .72);
+      const sky = context.createLinearGradient(0, 0, 0, innerHeight);
+      if (world.hazard === "icicle") { sky.addColorStop(0, "#5d9bd1"); sky.addColorStop(.7, "#dff7ff"); }
+      else if (world.hazard === "butter") { sky.addColorStop(0, "#e98643"); sky.addColorStop(.7, "#ffe4a8"); }
+      else if (world.hazard === "fireball") { sky.addColorStop(0, "#080910"); sky.addColorStop(.7, "#241014"); }
+      else if (world.hazard === "scythe") { sky.addColorStop(0, "#171329"); sky.addColorStop(.7, "#74658d"); }
+      else if (world.hazard === "smoke") { sky.addColorStop(0, "#403b3a"); sky.addColorStop(.7, "#b8aaa0"); }
+      else { sky.addColorStop(0, "#d8927b"); sky.addColorStop(.7, "#ffe0b8"); }
+      context.fillStyle = sky; context.fillRect(0, 0, innerWidth, innerHeight);
+      if (world.hazard !== "fireball") {
+        context.fillStyle = world.hazard === "scythe" ? "#d7c6ff" : world.hazard === "smoke" ? "#d2c5bc" : "#fff0a6";
+        context.beginPath(); context.arc(innerWidth * .78, innerHeight * .18, 48, 0, Math.PI * 2); context.fill();
       } else {
-        const t = (prog - 0.5) / 0.5; // 0→1
-        bx = canvas.width + 40 - t * (canvas.width + 40 - e.wx);
-        by = headHeight + t * (e.wy - headHeight);
-      }
-      const spin = prog * Math.PI * 10;
-      ctx.save(); ctx.translate(bx, by); ctx.rotate(spin);
-      ctx.strokeStyle = "#f7b731"; ctx.lineWidth = 5; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(-14, 0); ctx.quadraticCurveTo(0, -8, 14, 0); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, -14); ctx.quadraticCurveTo(8, 0, 0, 14); ctx.stroke();
-      ctx.restore();
-      // Damage all dummies along the boomerang path
-      for (let di = 0; di < dummies.length; di++) {
-        const chest = dummies[di].chest;
-        if (Math.hypot(chest.x - bx, chest.y - by) < 50) {
-          dummies[di].health -= 12 * (1/60); // smooth damage per frame
-          const dx = chest.x - bx, dy = chest.y - by, d = Math.hypot(dx,dy)||1;
-          chest.x += (dx/d)*4; chest.y += (dy/d)*4;
-          updateDamageDisplay();
+        const meteorTime = performance.now() / 1000;
+        for (let meteor = 0; meteor < 6; meteor++) {
+          const cycle = (meteorTime * (.35 + meteor * .04) + meteor * 1.7) % 5;
+          const meteorX = innerWidth * (.1 + ((meteor * .19 + cycle * .11) % .82));
+          const meteorY = 70 + ((cycle * 110 + meteor * 47) % (innerHeight * .42));
+          context.strokeStyle = "rgba(255, 120, 45, .65)"; context.lineWidth = 4;
+          context.beginPath(); context.moveTo(meteorX - 34, meteorY - 28); context.lineTo(meteorX, meteorY); context.stroke();
+          context.fillStyle = "#ffcf58"; context.beginPath(); context.arc(meteorX, meteorY, 7, 0, Math.PI * 2); context.fill();
+          if (cycle > 4.25) {
+            context.strokeStyle = "rgba(255, 80, 20, .75)"; context.lineWidth = 3;
+            context.beginPath(); context.arc(meteorX, meteorY, (cycle - 4.25) * 70, 0, Math.PI * 2); context.stroke();
+          }
         }
       }
-
-    } else if (e.weapon.type === "pull") {
-      // Magnet builds magnetic field
-      const x = e.wx, y = e.wy;
-      ctx.save();
-      // Magnetic field rings
-      for (let i = 0; i < 3; i++) {
-        ctx.strokeStyle = `rgba(181,228,140,${(1-prog)*0.6})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(x, y, 30 + i*20 + prog*20, 0, Math.PI*2); ctx.stroke();
+      if (world.hazard === "icicle") {
+        context.fillStyle = "rgba(255, 255, 255, .9)";
+        context.beginPath();
+        context.ellipse(innerWidth * .7, innerHeight * .16, 92, 25, 0, 0, Math.PI * 2);
+        context.ellipse(innerWidth * .8, innerHeight * .13, 78, 22, 0, 0, Math.PI * 2);
+        context.ellipse(innerWidth * .87, innerHeight * .19, 68, 20, 0, 0, Math.PI * 2);
+        context.fill();
       }
-      // Magnet core
-      ctx.fillStyle = "#b5e48c"; ctx.beginPath(); ctx.arc(x, y, 16, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = "#e74c3c"; ctx.beginPath(); ctx.arc(x, y-8, 8, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = "#3498db"; ctx.beginPath(); ctx.arc(x, y+8, 8, 0, Math.PI*2); ctx.fill();
-      ctx.restore();
-    }
-  }
-}
-
-// ─── APPLY WEAPON ─────────────────────────────────────────────────────────────
-function applyWeapon(wx, wy, weapon) {
-  freezeTimer = 0;
-  let hitAnyDummy = false;
-  let hitDummyIndices = [];
-  
-  // Apply weapon to all dummies
-  for (let di = 0; di < dummies.length; di++) {
-    const dummy = dummies[di];
-    const nodes = Object.entries(dummy).filter(([k]) => k!=='cx' && k!=='cy' && k!=='baseCX' && k!=='armAnimOffset' && k!=='health').map(([,v]) => v);
-    
-    let hitThisDummy = false;
-    
-    // Special weapons that don't need to hit individual nodes
-    if (["acid", "rocket_fly", "meteor_slam", "pizza_rats", "crusher"].includes(weapon.type)) {
-      hitThisDummy = true;
-      hitAnyDummy = true;
-      hitDummyIndices.push(di);
-    } else {
-      // Normal weapons check collision with nodes
-      for (const n of nodes) {
-        const dx = n.x - wx;
-        const dy = n.y - wy;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < weapon.radius) {
-          hitThisDummy = true;
-          hitAnyDummy = true;
-          if (!hitDummyIndices.includes(di)) hitDummyIndices.push(di);
-          const strength = (1 - d / weapon.radius) * weapon.force;
-          const nx = dx / d, ny = dy / d;
-          if      (weapon.type === "pull")  { n.x -= nx * strength; n.y -= ny * strength; }
-          else if (weapon.type === "spin")  { n.x += -ny * strength * 0.8; n.y += nx * strength * 0.8; }
-          else if (weapon.type === "wave_attack")  { n.x += nx * strength * Math.sin(Date.now() * 0.01); n.y -= strength * 0.5; }
-          else if (weapon.type === "falling_ball") { n.x += nx * strength; n.y += ny * strength * 1.4; }
-          else                              { n.x += nx * strength; n.y += ny * strength * 1.2; }
+      if (!car) return;
+      const groundFill = world.hazard === "icicle" ? "#ffffff" : world.hazard === "butter" ? "#202020" : world.hazard === "fireball" ? "#b93621" : "#56a848";
+      const groundEdge = world.hazard === "icicle" ? "#b9e5f5" : world.hazard === "butter" ? "#050505" : world.hazard === "fireball" ? "#ff6a24" : "#2b6836";
+      context.beginPath(); terrain.forEach((point, index) => { const screenX = point.x - view; index ? context.lineTo(screenX, point.y) : context.moveTo(screenX, point.y); }); context.lineTo(innerWidth + 80, innerHeight + 80); context.lineTo(-80, innerHeight + 80); context.closePath(); context.fillStyle = groundFill; context.fill();
+      context.beginPath(); terrain.forEach((point, index) => { const screenX = point.x - view; index ? context.lineTo(screenX, point.y) : context.moveTo(screenX, point.y); }); context.strokeStyle = groundEdge; context.lineWidth = 7; context.stroke();
+      hazards.forEach(hazard => {
+        const x = hazard.x - view, y = terrainAt(hazard.x);
+        if (x < -100 || x > innerWidth + 100) return;
+        if (hazard.type === "icicle") {
+          context.fillStyle = "#eaffff"; context.strokeStyle = "#3f8ec4"; context.lineWidth = 3;
+          context.beginPath(); context.moveTo(x - 18, 0); context.lineTo(x + 18, 0); context.lineTo(x, y - 80); context.closePath(); context.fill(); context.stroke();
+        } else if (hazard.type === "butter") {
+          const gapBottom = hazard.gap + 220;
+          context.fillStyle = "#ffe36e"; context.fillRect(x - 24, 0, 48, hazard.gap); context.fillRect(x - 24, gapBottom, 48, Math.max(0, y - gapBottom));
+          context.strokeStyle = "#c78623"; context.strokeRect(x - 24, 0, 48, hazard.gap); if (gapBottom < y) context.strokeRect(x - 24, gapBottom, 48, y - gapBottom);
+        } else if (hazard.type === "vent") {
+          const ventY = y - 8, pulse = 1 + Math.sin(performance.now() / 130 + hazard.phase) * .18;
+          context.fillStyle = "#6f3d24"; context.fillRect(x - 30, ventY - 8, 60, 14);
+          context.strokeStyle = "#ffd166"; context.lineWidth = 3; context.strokeRect(x - 30, ventY - 8, 60, 14);
+          context.strokeStyle = "rgba(255, 246, 210, .8)"; context.lineWidth = 2;
+          for (let gust = -1; gust <= 1; gust++) { context.beginPath(); context.moveTo(x + gust * 12, ventY - 12); context.lineTo(x + gust * 12 - gust * 16 * pulse, ventY - 42 - Math.abs(gust) * 8); context.stroke(); }
+        } else if (hazard.type === "fireball") {
+          const fireY = hazard.y + Math.sin((performance.now() / 240) + hazard.phase) * 14;
+          context.fillStyle = "#ffdf4f"; context.beginPath(); context.arc(x, fireY, 17, 0, Math.PI * 2); context.fill(); context.fillStyle = "#ef3b22"; context.beginPath(); context.arc(x, fireY, 9, 0, Math.PI * 2); context.fill();
+        } else if (hazard.type === "scythe") {
+          const scytheY = y - 78; context.save(); context.translate(x, scytheY); context.rotate(performance.now() / 260); context.strokeStyle = "#d9d4e8"; context.lineWidth = 8; context.beginPath(); context.arc(0, 0, 33, -.75, 1.3); context.stroke(); context.strokeStyle = "#5c3d78"; context.lineWidth = 5; context.beginPath(); context.moveTo(-6, 4); context.lineTo(30, 40); context.stroke(); context.restore();
+        } else if (hazard.type === "smoke") {
+          const smokeY = y - 12 + Math.sin(performance.now() / 360 + hazard.phase) * 4;
+          context.fillStyle = "rgba(67, 58, 55, .82)";
+          context.beginPath(); context.ellipse(x, smokeY, 52, 15, 0, 0, Math.PI * 2); context.fill();
+          context.fillStyle = "rgba(104, 94, 88, .58)";
+          context.beginPath(); context.arc(x - 22, smokeY - 14, 18, 0, Math.PI * 2); context.arc(x + 4, smokeY - 18, 24, 0, Math.PI * 2); context.arc(x + 28, smokeY - 11, 17, 0, Math.PI * 2); context.fill();
+        } else if (hazard.type === "signature") {
+          const pulse = Math.sin(performance.now() / 220 + hazard.phase) * 4;
+          const obstacleY = y - 30;
+          context.save(); context.translate(x, obstacleY);
+          if (hazard.signature === "snowdrift") { context.fillStyle = "#f8fdff"; context.beginPath(); context.ellipse(0, 25, 38, 25, 0, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "icepatch") { context.fillStyle = "#9ce9ff"; context.beginPath(); context.ellipse(0, 27, 46, 9, 0, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "whiteout") { context.fillStyle = "rgba(255,255,255,.8)"; context.beginPath(); context.ellipse(0, 0 + pulse, 54, 25, 0, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "crystal") { context.fillStyle = "#b8f3ff"; context.beginPath(); context.moveTo(-24, 30); context.lineTo(-10, -45); context.lineTo(4, 30); context.lineTo(19, -62); context.lineTo(34, 30); context.closePath(); context.fill(); }
+          else if (["flame", "spark", "ember", "firestorm"].includes(hazard.signature)) { context.fillStyle = hazard.signature === "spark" ? "#ffe45c" : "#ff542e"; context.beginPath(); context.moveTo(-22, 30); context.quadraticCurveTo(-12, -8, 0, 8); context.quadraticCurveTo(2, -24, 16, -38); context.quadraticCurveTo(17, 3, 28, 30); context.closePath(); context.fill(); }
+          else if (hazard.signature === "pan") { context.fillStyle = "#343434"; context.fillRect(-28, -12, 56, 38); context.fillRect(28, -5, 28, 12); context.strokeStyle = "#d5d5d5"; context.strokeRect(-28, -12, 56, 38); }
+          else if (hazard.signature === "steam") { context.strokeStyle = "rgba(255,255,255,.8)"; context.lineWidth = 6; context.beginPath(); context.arc(-16, 0, 15, Math.PI, 0); context.arc(12, -10, 18, Math.PI, 0); context.stroke(); }
+          else if (hazard.signature === "water") { context.rotate(slopeAt(hazard.x)); context.translate(0, 10); context.fillStyle = "#58d6ef"; context.beginPath(); context.ellipse(0, 18, 45, 12, 0, 0, Math.PI * 2); context.fill(); context.fillStyle = "#fff0a6"; context.beginPath(); context.arc(0, 8 + pulse, 5, 0, Math.PI * 2); context.arc(18, 2 + pulse, 4, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "lava") { context.fillStyle = "#ff3c1f"; context.beginPath(); context.ellipse(0, 28, 48, 13, 0, 0, Math.PI * 2); context.fill(); context.fillStyle = "#ffc247"; context.beginPath(); context.ellipse(0, 26, 22, 5, 0, 0, Math.PI * 2); context.fill(); }
+          else if (["coal", "lowSmoke", "smokering", "smokepillar", "smokefinale"].includes(hazard.signature)) { context.fillStyle = hazard.signature === "coal" ? "#302522" : "rgba(76,70,68,.72)"; context.beginPath(); context.ellipse(0, 24, 43, hazard.signature === "lowSmoke" ? 10 : 22, 0, 0, Math.PI * 2); context.fill(); if (hazard.signature === "smokering") { context.strokeStyle = "#c1b5ae"; context.lineWidth = 5; context.beginPath(); context.arc(0, -10 + pulse, 22, 0, Math.PI * 2); context.stroke(); } }
+          else if (hazard.signature === "plate") { context.fillStyle = "#f2f2f2"; context.beginPath(); context.ellipse(0, 27, 43, 10, 0, 0, Math.PI * 2); context.fill(); context.fillStyle = "#d95b58"; context.beginPath(); context.arc(0, 25, 16, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "foot" || hazard.signature === "stomp") { context.fillStyle = "#9f3d43"; context.beginPath(); context.ellipse(0, 10, 25, 48, 0, 0, Math.PI * 2); context.arc(-16, -36, 10, 0, Math.PI * 2); context.arc(0, -43, 10, 0, Math.PI * 2); context.arc(16, -36, 10, 0, Math.PI * 2); context.fill(); }
+          else if (hazard.signature === "palm" || hazard.signature === "hand") { context.fillStyle = "#df8d73"; context.beginPath(); context.roundRect(-25, -45, 50, 78, 18); context.fill(); for (let finger = -22; finger <= 22; finger += 15) context.fillRect(finger - 5, -75, 10, 40); }
+          context.restore();
+        } else {
+          context.fillStyle = hazard.type === "teeth" ? "#f6f2df" : "#ffbd3b"; context.beginPath(); context.moveTo(x - 20, y); context.lineTo(x, y - 36); context.lineTo(x + 20, y); context.fill();
         }
+      });
+      if (world.hazard === "hand" && levelInWorld(selectedLevel) === 5) {
+        const cycle = 240, phase = bossTimer % cycle, side = Math.floor(bossTimer / cycle) % 2;
+        const handX = side === 0 ? 86 : innerWidth - 86;
+        const handY = phase < 48 ? -170 + phase / 48 * (innerHeight * .62) : phase < 84 ? innerHeight * .62 : -170;
+        context.save(); context.translate(handX, handY); context.fillStyle = "#e99a79"; context.strokeStyle = "#7b303b"; context.lineWidth = 5;
+        context.beginPath(); context.roundRect(-58, -28, 116, 170, 30); context.fill(); context.stroke();
+        context.fillStyle = "#f3b092"; for (let finger = -42; finger <= 42; finger += 28) context.fillRect(finger - 10, 105, 20, 62); context.restore();
       }
+      const finishX = finish - view, finishY = terrainAt(finish); context.fillStyle = "#fff6df"; context.fillRect(finishX, finishY - 105, 8, 105); context.fillStyle = "#f4518d"; context.fillRect(finishX + 8, finishY - 105, 42, 28); context.fillStyle = "#15213b"; context.font = "bold 13px Trebuchet MS"; context.fillText("FINISH", finishX + 11, finishY - 86);
+      const x = car.x - view, y = car.y; context.save(); context.translate(x, y); context.rotate(car.angle); context.scale(1, car.squat ? .68 : 1);
+      const wheelColors = world.hazard === "icicle" ? ["#dffaff", "#71b8d1"] : world.hazard === "butter" ? ["#111111", "#f0a12b"] : world.hazard === "fireball" ? ["#35151a", "#ff6a24"] : world.hazard === "smoke" ? ["#302c2b", "#8d8178"] : ["#252334", "#e08d68"];
+      context.fillStyle = wheelColors[0]; context.beginPath(); context.arc(-20, 18, 13, 0, Math.PI * 2); context.arc(22, 18, 13, 0, Math.PI * 2); context.fill();
+      context.fillStyle = wheelColors[1]; context.beginPath(); context.arc(-20, 18, 5, 0, Math.PI * 2); context.arc(22, 18, 5, 0, Math.PI * 2); context.fill();
+      context.fillStyle = "#ff8db6"; context.fillRect(-33, -22, 66, 33); context.fillStyle = "#ffb8cf"; context.fillRect(21, -36, 27, 28); context.fillStyle = "#bd235d"; context.fillRect(43, -25, 12, 10); context.fillRect(24, -47, 8, 14); context.fillRect(40, -47, 8, 14); context.fillStyle = "#15213b"; context.fillRect(41, -36, 4, 4); context.restore();
     }
-  }
-  
-  if (weapon.type === "freeze") freezeTimer = 90;
-  
-  if (hitAnyDummy) {
-    spawnParticles(wx, wy, weapon.color, weapon.type === "explosion" ? 40 : 12);
-    
-    // Apply damage and effects to each hit dummy individually
-    if (weapon.type === "acid") {
-      acidDuration = 30 * 60; // 30 seconds at 60fps
-      acidX = wx;
-      acidY = wy;
-      for (const di of hitDummyIndices) dummies[di].health -= weapon.damage;
-    } else if (weapon.type === "pizza_rats") {
-      // Pizza spawns rats - target dummy nearest to click point
-      let nearestIdx = 0, nearestDist = Infinity;
-      for (let di = 0; di < dummies.length; di++) {
-        const dist = Math.hypot(dummies[di].head.x - wx, dummies[di].head.y - wy);
-        if (dist < nearestDist) { nearestDist = dist; nearestIdx = di; }
-      }
-      pizzaTargetDummyIdx = nearestIdx;
-      const targetDummy = dummies[nearestIdx];
-      pizzaPos = { x: targetDummy.head.x, y: targetDummy.head.y - 30 };
-      for (let i = 0; i < 12; i++) {
-        rats.push({
-          x: Math.random() * canvas.width,
-          y: FLOOR,
-          targetX: targetDummy.head.x + (Math.random() - 0.5) * 40,
-          targetY: targetDummy.head.y + (Math.random() - 0.5) * 40,
-          speed: 2 + Math.random() * 1,
-          life: 200,
-          hit: false
-        });
-      }
-      for (const di of hitDummyIndices) dummies[di].health -= weapon.damage;
-    } else if (weapon.type === "crusher") {
-      // Crusher: start the press session if not on cooldown
-      if (crusherCooldown <= 0 && !crusherActive) {
-        crusherActive = true;
-        crusherTimer = 600; // 10 seconds at 60fps
-        crusherPressY = canvas.height * 0.05;
-      }
-    } else if (weapon.type === "axe_throw" || weapon.type === "embed") {
-      // Find the nearest node across all dummies and stick the weapon in
-      let bestNode = null, bestDist = Infinity;
-      for (const dummy of dummies) {
-        const nodes = Object.entries(dummy).filter(([k]) => k!=='cx'&&k!=='cy'&&k!=='baseCX'&&k!=='armAnimOffset'&&k!=='health').map(([,v])=>v);
-        for (const n of nodes) {
-          const d = Math.hypot(n.x - wx, n.y - wy);
-          if (d < bestDist) { bestDist = d; bestNode = n; }
+    let previousTime = performance.now(), physicsTime = 0;
+    function loop(currentTime) {
+      physicsTime += Math.min(100, currentTime - previousTime);
+      previousTime = currentTime;
+      while (physicsTime >= 1000 / 60) { update(); physicsTime -= 1000 / 60; }
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    worlds.forEach((world, worldIndex) => {
+      const button = document.createElement("button");
+      button.textContent = `${worldIndex + 1}. ${world.name}`;
+      button.style.borderColor = world.accent;
+      button.addEventListener("click", () => {
+        if (worldIndex * 5 + 1 > unlockedLevel) {
+          message.textContent = "Finish the previous level to unlock this world.";
+          return;
         }
-      }
-      if (bestNode) {
-        stuckAxes.push({ node: bestNode, ox: Math.random()*6-3, oy: -16, angle: Math.random()*0.5-0.25, weaponName: weapon.name });
-      }
-      // Apply damage to nearest dummy
-      let closestDi = 0, closestD = Infinity;
-      for (let di = 0; di < dummies.length; di++) {
-        const d = Math.hypot(dummies[di].chest.x - wx, dummies[di].chest.y - wy);
-        if (d < closestD) { closestD = d; closestDi = di; }
-      }
-      dummies[closestDi].health -= weapon.damage;
-      standupTimer = 15;
-    } else if (!['rocket_fly', 'meteor_slam', 'crusher', 'axe_throw', 'embed', 'boomerang'].includes(weapon.type)) {
-      // Normal weapons apply damage to each hit dummy
-      for (const di of hitDummyIndices) dummies[di].health -= weapon.damage;
-      standupTimer = 15; // Only center dummy knockdown
-    }
-    if (weapon.type !== "acid" && weapon.type !== "pizza_rats") {
-      updateDamageDisplay();
-    }
-  }
-}
-
-// ─── PARTICLES ────────────────────────────────────────────────────────────────
-function spawnParticles(x, y, color, count) {
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * 6 + 1;
-    particles.push({ x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed - 2,
-                     life: 1, color, size: Math.random() * 6 + 2 });
-  }
-}
-function updateParticles() {
-  for (const p of particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life -= 0.025; }
-  particles = particles.filter(p => p.life > 0);
-}
-
-// ─── DRAW ─────────────────────────────────────────────────────────────────────
-function line(a, b, color, w) {
-  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-}
-function circle(n, r, color) {
-  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI*2); ctx.fill();
-}
-
-function drawOneDummy(d, isCenter) {
-  const skin  = freezeTimer > 0 ? "#a0d8ef" : "#f4a261";
-  const cloth = freezeTimer > 0 ? "#48cae4" : "#e76f51";
-  const pant  = freezeTimer > 0 ? "#0077b6" : "#2a6df5";
-  const shoe  = "#333";
-
-  line(d.lHip, d.lKnee, pant, 10); line(d.lKnee, d.lFoot, pant, 9); circle(d.lFoot, 7, shoe);
-  line(d.rHip, d.rKnee, pant, 10); line(d.rKnee, d.rFoot, pant, 9); circle(d.rFoot, 7, shoe);
-  line(d.neck, d.hip, cloth, 20);
-  line(d.lShoulder, d.rShoulder, cloth, 14);
-  line(d.hip, d.lHip, pant, 12); line(d.hip, d.rHip, pant, 12);
-  
-  // All dummies draw arms the same way
-  line(d.lShoulder, d.lElbow, skin, 9); line(d.lElbow, d.lHand, skin, 7); circle(d.lHand, 5, skin);
-  line(d.rShoulder, d.rElbow, skin, 9); line(d.rElbow, d.rHand, skin, 7); circle(d.rHand, 5, skin);
-  
-  circle(d.head, 22, skin);
-  ctx.fillStyle = "#333";
-  ctx.beginPath(); ctx.arc(d.head.x - 7, d.head.y - 5, 4, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(d.head.x + 7, d.head.y - 5, 4, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(d.head.x, d.head.y + 6, 8, 0.1*Math.PI, 0.9*Math.PI); ctx.stroke();
-  
-  // Beat-up visual progression - applies to ALL dummies based on their individual health
-  const damagePercent = (100000 - d.health) / 100000;
-  if (damagePercent > 0.3) {
-    // Bruises appear at 30%
-    ctx.fillStyle = "rgba(100,50,150,0.3)";
-    ctx.beginPath(); ctx.arc(d.head.x - 8, d.head.y + 3, 6, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(d.head.x + 5, d.head.y - 8, 5, 0, Math.PI*2); ctx.fill();
-  }
-  if (damagePercent > 0.5) {
-    // Cracks and tears at 50%
-    ctx.strokeStyle = "rgba(50,30,100,0.5)"; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(d.chest.x - 5, d.chest.y - 8); ctx.lineTo(d.chest.x + 8, d.chest.y + 5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(d.belly.x + 3, d.belly.y - 6); ctx.lineTo(d.belly.x - 6, d.belly.y + 7); ctx.stroke();
-  }
-  if (damagePercent > 0.7) {
-    // Heavy damage at 70% - more bruises, blood
-    ctx.fillStyle = "rgba(200,0,0,0.2)";
-    ctx.beginPath(); ctx.arc(d.chest.x + 10, d.chest.y + 5, 8, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(d.belly.x - 8, d.belly.y - 3, 7, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = "rgba(100,50,150,0.4)";
-    ctx.beginPath(); ctx.arc(d.head.x - 12, d.head.y - 10, 7, 0, Math.PI*2); ctx.fill();
-  }
-  if (damagePercent > 0.85) {
-    // Critical damage at 85% - falling apart
-    ctx.strokeStyle = "rgba(150,50,50,0.6)"; ctx.lineWidth = 2;
-    for (let i = 0; i < 3; i++) {
-      const tx = d.chest.x + (Math.random() - 0.5) * 20;
-      const ty = d.chest.y + (Math.random() - 0.5) * 20;
-      ctx.beginPath(); ctx.arc(tx, ty, 2, 0, Math.PI*2); ctx.stroke();
-    }
-  }
-}
-
-function drawDummy() {
-  // Draw all dummies
-  for (let i = 0; i < dummies.length; i++) {
-    drawOneDummy(dummies[i], i === mainDummyIndex);
-  }
-  // Draw stuck weapons on top of dummies
-  for (const axe of stuckAxes) {
-    const n = axe.node;
-    ctx.save();
-    ctx.translate(n.x + axe.ox, n.y + axe.oy);
-    ctx.rotate(axe.angle);
-    const wname = axe.weaponName || 'Axe';
-    if (wname.includes('Hammer')) {
-      ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -14, 4, 14);
-      ctx.fillStyle = "#e76f51"; ctx.fillRect(-9, -14, 18, 7);
-    } else if (wname.includes('Pickaxe')) {
-      ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -12, 4, 12);
-      ctx.fillStyle = "#adb5bd";
-      ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(-9,-5); ctx.lineTo(-5,-9); ctx.lineTo(5,-9); ctx.lineTo(9,-5); ctx.fill();
-    } else if (wname.includes('Wrench')) {
-      ctx.fillStyle = "#ced4da";
-      ctx.beginPath(); ctx.arc(0,-6,6,0,Math.PI*2); ctx.fill();
-      ctx.fillRect(-2,0,4,12);
-      ctx.beginPath(); ctx.arc(0,12,4,0,Math.PI*2); ctx.fill();
-    } else if (wname.includes('Reaper')) {
-      ctx.fillStyle = "#555"; ctx.fillRect(-2,-18,4,18);
-      ctx.fillStyle = "#6c757d";
-      ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(15,-13); ctx.quadraticCurveTo(17,-18,15,-22); ctx.lineTo(0,-18); ctx.fill();
-    } else {
-      // Axe
-      ctx.fillStyle = "#8b4513"; ctx.fillRect(-2, -14, 4, 14);
-      ctx.fillStyle = "#e9c46a";
-      ctx.beginPath(); ctx.moveTo(0,-14); ctx.lineTo(12,-9); ctx.lineTo(8,-4); ctx.lineTo(-4,-9); ctx.fill();
-    }
-    ctx.restore();
-  }
-}
-
-function drawParticles() {
-  for (const p of particles) {
-    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
-
-const DUMMY_NAMES = ["Center", "Left", "Right", "Inner-Left", "Inner-Right"];
-
-function updateDamageDisplay() {
-  const centerDummy = dummies[mainDummyIndex];
-  const totalDamage = dummies.reduce((sum, d) => sum + (100000 - d.health), 0);
-  const maxDamage = 100000 * dummies.length;
-  if (centerDummy.health <= 0) {
-    dead = true;
-    document.getElementById("dmg").textContent = "💀 DEAD 💀";
-  } else {
-    document.getElementById("dmg").textContent = `Total damage: ${Math.round(totalDamage)}/${maxDamage}`;
-  }
-}
-
-function drawFloor() {
-  if (currentTheme !== "lava") {
-    ctx.fillStyle = "#16213e";
-    ctx.fillRect(0, FLOOR, canvas.width, canvas.height - FLOOR);
-    ctx.strokeStyle = "#457b9d"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, FLOOR); ctx.lineTo(canvas.width, FLOOR); ctx.stroke();
-  }
-}
-
-function drawAcidVat() {
-  if (acidDuration <= 0) return;
-  
-  const x = CX, y = FLOOR + 40;
-  const vatHeight = 60 * (acidDuration / (30 * 60)); // Drains over 30 seconds
-  
-  // Vat container
-  ctx.save();
-  ctx.strokeStyle = "#999";
-  ctx.lineWidth = 4;
-  ctx.fillStyle = "rgba(46,204,113,0.15)";
-  ctx.beginPath();
-  ctx.moveTo(x - 80, y - 60);
-  ctx.lineTo(x - 100, y);
-  ctx.lineTo(x + 100, y);
-  ctx.lineTo(x + 80, y - 60);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  
-  // Acid goo inside
-  ctx.fillStyle = "rgba(46,204,113,0.7)";
-  ctx.beginPath();
-  const sloosh = Math.sin(Date.now() * 0.005) * 15;
-  ctx.moveTo(x - 80 + sloosh, y - 60 + (60 - vatHeight));
-  for (let i = 0; i <= 160; i += 10) {
-    const wave = Math.sin(i * 0.03 + Date.now() * 0.008) * 8;
-    ctx.lineTo(x - 80 + i, y - 60 + (60 - vatHeight) + wave);
-  }
-  ctx.lineTo(x + 100, y);
-  ctx.lineTo(x - 100, y);
-  ctx.closePath();
-  ctx.fill();
-  
-  // Bubbles
-  for (let i = 0; i < 8; i++) {
-    const bx = x + (Math.sin(i * 0.8 + Date.now() * 0.003) * 80);
-    const by = y - 20 - (Date.now() * 0.1 + i * 500) % 100;
-    const bubbleSize = 3 + Math.sin(i + Date.now() * 0.01) * 2;
-    ctx.fillStyle = "rgba(100,255,100,0.3)";
-    ctx.beginPath(); ctx.arc(bx, by, bubbleSize, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle = "rgba(150,255,150,0.5)"; ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-  
-  ctx.restore();
-  
-  // Dummy taking acid damage
-  for (const n of getNodes()) {
-    const dx = n.x - x;
-    const dy = n.y - (y - vatHeight + 20);
-    const d = Math.hypot(dx, dy);
-    if (d < 100) {
-      // Dissolve effect - slight pull downward
-      n.y += 0.5;
-      dummies[mainDummyIndex].health -= 0.0275; // 99 damage per second (1.65 per frame at 60fps)
-    }
-  }
-  
-  acidDuration--;
-}
-
-// ─── WEAPON BUTTONS ───────────────────────────────────────────────────────────
-let activeWeapon = 0;
-const hud = document.getElementById("hud");
-
-// Add theme buttons first
-Object.entries(THEMES).forEach(([key, theme]) => {
-  const btn = document.createElement("button");
-  btn.className = "wb" + (key === "classic" ? " active" : "");
-  btn.textContent = "🎨 " + theme.name;
-  btn.addEventListener("click", () => {
-    currentTheme = key;
-    document.querySelectorAll(".wb").forEach((b, j) => {
-      b.classList.toggle("active", b.textContent === "🎨 " + theme.name);
+        selectedWorld = worldIndex;
+        selectedLevel = worldIndex * 5 + 1;
+        isDaily = false;
+        renderLevelLocks();
+        message.textContent = `${world.name}: choose one of five harder courses.`;
+      });
+      worldButtons.append(button);
     });
-  });
-  hud.appendChild(btn);
-});
-
-// Add separator
-const sep = document.createElement("div");
-sep.style.width = "2px";
-sep.style.background = "#444";
-sep.style.height = "20px";
-sep.style.margin = "5px 3px";
-hud.appendChild(sep);
-
-// Add weapon buttons
-WEAPONS.forEach((w, i) => {
-  const btn = document.createElement("button");
-  btn.className = "wb" + (i === 0 ? " active" : "");
-  btn.textContent = w.name;
-  btn.addEventListener("click", () => {
-    activeWeapon = i;
-    document.querySelectorAll(".wb").forEach((b, j) => {
-      const isWeaponBtn = !b.textContent.startsWith("🎨");
-      const idx = Array.from(document.querySelectorAll(".wb")).filter(x => !x.textContent.startsWith("🎨")).indexOf(b);
-      if (isWeaponBtn) b.classList.toggle("active", idx === i);
-    });
-  });
-  hud.appendChild(btn);
-});
-
-// ─── HUD TOGGLE ───────────────────────────────────────────────────────────────
-document.getElementById("hudToggle").addEventListener("click", () => {
-  hudVisible = !hudVisible;
-  const hud = document.getElementById("hud");
-  const dmg = document.getElementById("dmg");
-  const toggle = document.getElementById("hudToggle");
-  
-  if (hudVisible) {
-    hud.classList.remove("hidden");
-    dmg.classList.remove("bottom-right");
-    toggle.textContent = "🔽 HUD";
-  } else {
-    hud.classList.add("hidden");
-    dmg.classList.add("bottom-right");
-    toggle.textContent = "🔼 HUD";
-  }
-});
-
-// ─── INPUT ────────────────────────────────────────────────────────────────────
-let mouseDown = false;
-canvas.addEventListener("mousedown", e => {
-  if (e.button !== 0) return;
-  mouseDown = true;
-  triggerWeapon(e.clientX, e.clientY, WEAPONS[activeWeapon]);
-});
-canvas.addEventListener("mousemove", e => {
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-  if (!mouseDown) return;
-  const w = WEAPONS[activeWeapon];
-  if (["burn","freeze","pull","wave_attack"].includes(w.type)) {
-    applyWeapon(e.clientX, e.clientY, w);
-  }
-});
-canvas.addEventListener("mouseup", () => { mouseDown = false; waveTime = 0; });
-canvas.addEventListener("touchstart", e => {
-  e.preventDefault();
-  for (const t of e.changedTouches) triggerWeapon(t.clientX, t.clientY, WEAPONS[activeWeapon]);
-}, { passive: false });
-canvas.addEventListener("touchmove", e => {
-  e.preventDefault();
-  if (e.changedTouches.length > 0) {
-    lastMouseX = e.changedTouches[0].clientX;
-    lastMouseY = e.changedTouches[0].clientY;
-  }
-  for (const t of e.changedTouches) {
-    const w = WEAPONS[activeWeapon];
-    if (["burn","freeze","pull","wave_attack"].includes(w.type)) applyWeapon(t.clientX, t.clientY, w);
-  }
-}, { passive: false });
-
-document.getElementById("reset").addEventListener("click", () => {
-  dummies = [
-    buildDummy(CX, FLOOR),
-    buildDummy(CX - 300, FLOOR - 50),
-    buildDummy(CX + 300, FLOOR - 50),
-    buildDummy(CX - 150, FLOOR - 80),
-    buildDummy(CX + 150, FLOOR - 80),
-  ];
-  totalDamage = 0;
-  particles = [];
-  freezeTimer = 0;
-  pendingEffects = [];
-  standupTimer = 0;
-  waveTime = 0;
-  dead = false;
-  acidDuration = 0;
-  rats = [];
-  pizzaPos = null;
-  crusherActive = false;
-  crusherTimer = 0;
-  crusherCooldown = 0;
-  stuckAxes = [];
-  document.getElementById("dmg").textContent = "Total damage: 0/500000";
-});
-
-// ─── CONTINUOUS EFFECTS ───────────────────────────────────────────────────────
-function drawContinuousWave() {
-  waveTime += 0.15 + Math.min(waveTime * 0.01, 0.6); // Accelerates the longer you hold
-  const waveX = waveTime * 5;
-  if (waveX > canvas.width) { waveTime = 0; return; } // Loop wave
-  
-  ctx.save();
-  ctx.strokeStyle = "rgba(72,202,228,0.8)";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  for (let y = canvas.height * 0.1; y < canvas.height * 0.9; y += 12) {
-    const offset = Math.sin((y / 30) + waveTime * 0.1) * 30;
-    ctx.lineTo(waveX + offset, y);
-  }
-  ctx.stroke();
-  ctx.fillStyle = "rgba(72,202,228,0.3)";
-  ctx.beginPath(); ctx.arc(waveX, canvas.height/2, 80, 0, Math.PI*2); ctx.fill();
-  ctx.restore();
-  
-  // Apply damage as wave passes through ALL dummies
-  const weapon = WEAPONS[activeWeapon];
-  for (let di = 0; di < dummies.length; di++) {
-    const dnodes = Object.entries(dummies[di]).filter(([k]) => k!=='cx'&&k!=='cy'&&k!=='baseCX'&&k!=='armAnimOffset'&&k!=='health').map(([,v])=>v);
-    let hit = false;
-    for (const n of dnodes) {
-      const dy = n.y - (canvas.height/2);
-      if (Math.abs(dy) < 200 && Math.abs(waveX - n.x) < 60) {
-        hit = true;
-        const strength = (1 - Math.abs(dy)/200) * weapon.force;
-        n.x += strength * 0.8;
-        n.y -= strength * 0.3;
-      }
+    for (let level = 1; level <= worlds.length * 5; level++) {
+      const button = document.createElement("button");
+      button.textContent = `${worldForLevel(level) + 1}-${levelInWorld(level)}`;
+      button.disabled = level > unlockedLevel;
+      button.addEventListener("click", () => {
+        selectedLevel = level;
+        selectedWorld = worldForLevel(level);
+        isDaily = false;
+        renderLevelLocks();
+        const world = worlds[selectedWorld];
+        message.textContent = `${world.name} ${levelInWorld(level)}: ${world.levels[levelInWorld(level) - 1]}. Watch for ${world.hazard} hazards.`;
+      });
+      levelButtons.append(button);
     }
-    if (hit) dummies[di].health -= weapon.damage;
-  }
-  updateDamageDisplay();
-}
-
-function drawContinuousFlame() {
-  // PK Fire style eruption from ground
-  const weapon = WEAPONS[activeWeapon];
-  
-  for (let i = 0; i < 3; i++) {
-    const time = Date.now() * 0.002 + i * 0.3;
-    const flameX = lastMouseX + Math.sin(time) * 15;
-    const flameH = 60 + Math.sin(time * 1.5) * 20;
-    
-    // Draw flame
-    ctx.save();
-    ctx.fillStyle = `rgba(255,107,53,${0.6 - i*0.15})`;
-    ctx.beginPath();
-    ctx.ellipse(flameX, FLOOR - flameH/2, 20 + i*8, flameH, 0, 0, Math.PI*2);
-    ctx.fill();
-    
-    // Yellow center
-    ctx.fillStyle = `rgba(255,200,0,${0.4 - i*0.1})`;
-    ctx.beginPath();
-    ctx.ellipse(flameX, FLOOR - flameH/2 + 10, 10 + i*4, flameH * 0.6, 0, 0, Math.PI*2);
-    ctx.fill();
-    ctx.restore();
-  }
-  
-  // Apply flame damage to ALL dummies
-  for (let di = 0; di < dummies.length; di++) {
-    const dnodes = Object.entries(dummies[di]).filter(([k]) => k!=='cx'&&k!=='cy'&&k!=='baseCX'&&k!=='armAnimOffset'&&k!=='health').map(([,v])=>v);
-    let hit = false;
-    for (const n of dnodes) {
-      const dx = n.x - lastMouseX;
-      const dy = n.y - FLOOR;
-      const d = Math.hypot(dx, dy) || 1;
-      if (d < 80 && dy < 60) {
-        hit = true;
-        const strength = (1 - d / 80) * weapon.force;
-        n.x += (dx/d) * strength * 0.3;
-        n.y -= strength * 0.2;
-      }
-    }
-    if (hit) dummies[di].health -= weapon.damage * 0.05;
-  }
-  updateDamageDisplay();
-}
-
-function drawContinuousMagnet() {
-  const x = lastMouseX, y = lastMouseY;
-  ctx.save();
-  // Magnetic field rings
-  for (let i = 0; i < 4; i++) {
-    ctx.strokeStyle = `rgba(181,228,140,${0.5 - i*0.1})`;
-    ctx.lineWidth = 3 - i*0.5;
-    ctx.beginPath(); ctx.arc(x, y, 40 + i*30, 0, Math.PI*2); ctx.stroke();
-  }
-  // Magnet core
-  ctx.fillStyle = "#b5e48c"; ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = "#e74c3c"; ctx.beginPath(); ctx.arc(x, y-10, 10, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = "#3498db"; ctx.beginPath(); ctx.arc(x, y+10, 10, 0, Math.PI*2); ctx.fill();
-  ctx.restore();
-  
-  // Pull dummy toward magnet
-  for (const n of getNodes()) {
-    const dx = x - n.x;
-    const dy = y - n.y;
-    const d = Math.hypot(dx, dy) || 1;
-    if (d < 200) {
-      const strength = (1 - d / 200) * 0.5;
-      n.x += (dx / d) * strength;
-      n.y += (dy / d) * strength;
-    }
-  }
-}
-
-// ─── CRUSHER ─────────────────────────────────────────────────────────────────
-function drawCrusher() {
-  if (crusherCooldown > 0) {
-    crusherCooldown--;
-    // Show cooldown bar
-    const pct = 1 - crusherCooldown / 300;
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(canvas.width/2 - 120, 8, 240, 18);
-    ctx.fillStyle = pct < 0.5 ? "#e74c3c" : "#2ecc71";
-    ctx.fillRect(canvas.width/2 - 120, 8, 240 * pct, 18);
-    ctx.strokeStyle = "#555"; ctx.lineWidth = 1;
-    ctx.strokeRect(canvas.width/2 - 120, 8, 240, 18);
-    ctx.fillStyle = "#fff"; ctx.font = "11px Consolas";
-    ctx.textAlign = "center";
-    ctx.fillText("🏭 Crusher cooldown...", canvas.width/2, 21);
-    ctx.textAlign = "left";
-    ctx.restore();
-    return;
-  }
-  if (!crusherActive) return;
-
-  crusherTimer--;
-  if (crusherTimer <= 0) {
-    crusherActive = false;
-    crusherCooldown = 300; // 5 second cooldown
-    return;
-  }
-
-  // Rapid press cycle: 20-frame cycle (0→down→up→0)
-  const cycle = 20;
-  const phase = (Date.now() / (1000/60)) % cycle / cycle; // 0→1 each cycle
-  const pressDown = phase < 0.5 ? phase * 2 : (1 - phase) * 2; // triangle wave 0→1→0
-  
-  const plateTop = canvas.height * 0.05;
-  const plateBottom = FLOOR - 30;
-  const plateY = plateTop + (plateBottom - plateTop) * pressDown;
-  const pressW = canvas.width * 0.8;
-  const pressX = canvas.width / 2 - pressW / 2;
-
-  ctx.save();
-  // Hydraulic arms (left and right)
-  ctx.strokeStyle = "#666"; ctx.lineWidth = 16;
-  ctx.beginPath(); ctx.moveTo(pressX + 40, 0); ctx.lineTo(pressX + 40, plateY); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(pressX + pressW - 40, 0); ctx.lineTo(pressX + pressW - 40, plateY); ctx.stroke();
-  // Cylinder highlights
-  ctx.strokeStyle = "#999"; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(pressX + 44, 0); ctx.lineTo(pressX + 44, plateY * 0.7); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(pressX + pressW - 44, 0); ctx.lineTo(pressX + pressW - 44, plateY * 0.7); ctx.stroke();
-  // Press plate
-  const grad = ctx.createLinearGradient(pressX, plateY, pressX, plateY + 28);
-  grad.addColorStop(0, "#bbb");
-  grad.addColorStop(0.5, "#888");
-  grad.addColorStop(1, "#555");
-  ctx.fillStyle = grad;
-  ctx.fillRect(pressX, plateY, pressW, 28);
-  // Rivets
-  ctx.fillStyle = "#aaa";
-  for (let i = 0; i < 8; i++) {
-    const rx = pressX + (i + 0.5) * (pressW / 8);
-    ctx.beginPath(); ctx.arc(rx, plateY + 14, 5, 0, Math.PI*2); ctx.fill();
-  }
-  // Warning stripes
-  for (let i = 0; i < 8; i++) {
-    ctx.fillStyle = i % 2 === 0 ? "rgba(255,200,0,0.7)" : "rgba(0,0,0,0.5)";
-    ctx.fillRect(pressX + i * (pressW / 8), plateY, pressW / 8, 6);
-  }
-  // Flash on full press
-  if (pressDown > 0.9) {
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    spawnParticles(canvas.width/2, FLOOR - 20, "#ccc", 8);
-  }
-  ctx.restore();
-
-  // Apply damage on the down-stroke when plate is near the floor
-  if (pressDown > 0.85) {
-    for (let di = 0; di < dummies.length; di++) {
-      const d = dummies[di];
-      // Squash all nodes toward the floor
-      const nodes = Object.values(d).filter(v => v && typeof v.x === "number");
-      for (const n of nodes) {
-        n.y = FLOOR - 5 + (Math.random() - 0.5) * 4;
-        n.x += (Math.random() - 0.5) * 6;
-      }
-      // Damage per press: 2000 / (10 presses/sec × 10 sec) = ~20 per cycle hit
-      d.health -= 2000 / (600 / cycle * 0.15);
-    }
-    updateDamageDisplay();
-  }
-
-  // Time remaining bar
-  const pct = crusherTimer / 600;
-  ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
-  ctx.fillRect(canvas.width/2 - 120, 8, 240, 18);
-  ctx.fillStyle = "#e74c3c";
-  ctx.fillRect(canvas.width/2 - 120, 8, 240 * pct, 18);
-  ctx.strokeStyle = "#555"; ctx.lineWidth = 1;
-  ctx.strokeRect(canvas.width/2 - 120, 8, 240, 18);
-  ctx.fillStyle = "#fff"; ctx.font = "11px Consolas";
-  ctx.textAlign = "center";
-  ctx.fillText(`🏭 CRUSHING... ${(crusherTimer/60).toFixed(1)}s`, canvas.width/2, 21);
-  ctx.textAlign = "left";
-  ctx.restore();
-}
-
-// ─── GAME LOOP ────────────────────────────────────────────────────────────────
-function loop() {
-  // Draw theme background
-  THEMES[currentTheme].draw();
-  drawFloor();
-  // Draw continuous wave effect
-  if (mouseDown && WEAPONS[activeWeapon].type === "wave_attack") {
-    drawContinuousWave();
-  }
-  // Draw continuous flame effect
-  if (mouseDown && WEAPONS[activeWeapon].type === "burn") {
-    drawContinuousFlame();
-  }
-  // Draw continuous magnet effect
-  if (mouseDown && WEAPONS[activeWeapon].type === "pull") {
-    drawContinuousMagnet();
-  }
-  // Draw crusher press
-  if (crusherActive || crusherCooldown > 0) {
-    drawCrusher();
-  }
-  integrate();
-  applyConstraints();
-  updatePendingEffects();
-  drawParticles();
-  drawDummy();
-  drawAcidVat();
-  drawPendingEffects();
-  updateParticles();
-  updateDamageDisplay();
-  requestAnimationFrame(loop);
-}
-loop();
-</script>
+    daily.addEventListener("click", () => { isDaily = true; message.textContent = `Today’s course is generated from ${localDayKey()}. Everyone gets the same challenge until midnight.`; });
+    play.addEventListener("click", startGame);
+    addEventListener("keydown", event => { keys.add(event.code); if (event.code === "Space" && !event.repeat) jumpQueued = true; if (event.code === "KeyR" && playing) startGame(); if (["ArrowLeft", "ArrowRight", "ArrowDown", "Space"].includes(event.code)) event.preventDefault(); });
+    addEventListener("keyup", event => keys.delete(event.code));
+    renderLevelLocks();
+    buildCourse(1, false); requestAnimationFrame(loop);
+  </script>
 </body>
 </html>
