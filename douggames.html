@@ -2829,9 +2829,38 @@ async function openCommunityGame(
         "allow-scripts"
     );
 
-    gameFrame.srcdoc =
+    gameFrame.setAttribute(
+        "scrolling",
+        "no"
+    );
+
+    let gameCode =
         game.code ||
         "<h1>No game code</h1>";
+
+    const viewportTag =
+        '<meta name="viewport" content="width=1280,height=720,initial-scale=1,maximum-scale=1,user-scalable=no">';
+
+    if (/<meta\s+name=["']viewport["'][^>]*>/i.test(gameCode)) {
+        gameCode =
+            gameCode.replace(
+                /<meta\s+name=["']viewport["'][^>]*>/i,
+                viewportTag
+            );
+    } else if (/<head[^>]*>/i.test(gameCode)) {
+        gameCode =
+            gameCode.replace(
+                /<head[^>]*>/i,
+                match => match + viewportTag
+            );
+    } else {
+        gameCode =
+            viewportTag +
+            gameCode;
+    }
+
+    gameFrame.srcdoc =
+        gameCode;
 
     document
         .getElementById(
@@ -2892,6 +2921,29 @@ if (playerOverlay) {
 
 }
 
+
+/* PREVENT ACCIDENTAL BROWSER ZOOM WHILE PLAYING */
+if (playerOverlay) {
+    playerOverlay.addEventListener(
+        "wheel",
+        function(event) {
+            if (event.ctrlKey) {
+                event.preventDefault();
+            }
+        },
+        { passive: false }
+    );
+}
+
+document.addEventListener(
+    "keydown",
+    function(event) {
+        if (!playerOverlay?.classList.contains("show")) return;
+        if (event.ctrlKey && ["+", "=", "-", "0"].includes(event.key)) {
+            event.preventDefault();
+        }
+    }
+);
 
 async function closeGame() {
 
