@@ -2759,13 +2759,17 @@ async function openCommunityGame(
             game.title ||
             "Game";
 
-    document
-        .getElementById(
-            "gameFrame"
-        )
-        .srcdoc =
-            game.code ||
-            "<h1>No game code</h1>";
+    const gameFrame =
+        document.getElementById("gameFrame");
+
+    gameFrame.setAttribute(
+        "sandbox",
+        "allow-scripts"
+    );
+
+    gameFrame.srcdoc =
+        game.code ||
+        "<h1>No game code</h1>";
 
     document
         .getElementById(
