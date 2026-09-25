@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Smack 'n Punch — Mayhem Edition</title>
+<title>Smack 'n Punch | DougHub</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #1a1a2e; overflow: hidden; font-family: Consolas, monospace; user-select: none; }
@@ -39,11 +39,27 @@
   #hudToggle:hover { background: #666; }
   #homeBtn {
     position: fixed; bottom: 12px; left: 14px;
-    padding: 6px 14px; background: #2a0d4d; color: #ffd400; border: 2px solid #6a2bd9;
-    border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; cursor: pointer;
-    z-index: 11;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 13px; background: rgba(13,17,39,.94); color: #fff;
+    border: 1px solid rgba(129,140,248,.5); border-radius: 10px;
+    font-family: Consolas, monospace; font-size: 13px; font-weight: 900; cursor: pointer;
+    z-index: 11; box-shadow: 0 8px 25px rgba(0,0,0,.3); backdrop-filter: blur(10px);
   }
-  #homeBtn:hover { background: #6a2bd9; color: #fff; }
+  #homeBtn:hover { background: rgba(99,102,241,.28); border-color: #818cf8; transform: translateY(-1px); }
+  #homeBtn img { width: 24px; height: 24px; border-radius: 7px; display: block; }
+  #powerHud {
+    position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%);
+    min-width: 230px; padding: 7px 12px; border-radius: 11px;
+    background: rgba(8,10,22,.9); border: 1px solid rgba(99,102,241,.55);
+    color: #fff; text-align: center; font: 900 12px Consolas, monospace;
+    z-index: 9; pointer-events: none; box-shadow: 0 8px 24px rgba(0,0,0,.28);
+  }
+  #powerHud strong { color: #a5b4fc; }
+  #powerHud .power-key { color: #67e8f9; }
+  #powerHud .power-bar { margin-top: 5px; height: 6px; overflow: hidden; border-radius: 999px; background: #20243a; }
+  #powerHud .power-fill { width: 100%; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#6366f1,#22d3ee); }
+  #weaponWheel { right: 14px; bottom: 54px; }
+  #weaponWheel.hidden { display: none; }
   #hud.hidden { display: none; }
   #dmg.bottom-right {
     bottom: 12px; right: 14px; left: auto; transform: none;
@@ -68,14 +84,15 @@
 <canvas id="c"></canvas>
 <div id="dmg">Total damage: 0</div>
 <button id="reset">Reset</button>
-<button id="homeBtn">🏠 Kaicade</button>
+<button id="homeBtn" aria-label="Return to DougHub"><img src="../DougHub.ico" alt="DougHub"> <span>DougHub</span></button>
+<div id="powerHud"><strong>POWER SMACK</strong> <span class="power-key">SHIFT</span><div class="power-bar"><div class="power-fill"></div></div></div>
 
 <script>
 document.getElementById("homeBtn").addEventListener("click", () => {
   if (window.parent !== window) {
-    window.parent.postMessage({ type: "kaicade-home" }, "*");
+    window.parent.location.href = "../index.html";
   } else {
-    window.location.href = "kaicade.html";
+    window.location.href = "../index.html";
   }
 });
 </script>
@@ -1491,15 +1508,18 @@ document.getElementById("hudToggle").addEventListener("click", () => {
   const hud = document.getElementById("hud");
   const dmg = document.getElementById("dmg");
   const toggle = document.getElementById("hudToggle");
+  const weaponWheel = document.getElementById("weaponWheel");
   
   if (hudVisible) {
     hud.classList.remove("hidden");
     dmg.classList.remove("bottom-right");
     toggle.textContent = "🔽 HUD";
+    weaponWheel.classList.remove("hidden");
   } else {
     hud.classList.add("hidden");
     dmg.classList.add("bottom-right");
     toggle.textContent = "🔼 HUD";
+    weaponWheel.classList.add("hidden");
   }
 });
 
