@@ -389,6 +389,49 @@ button:disabled {
     font-weight: 700;
 }
 
+
+/* MODERN SCROLL AREAS */
+.admin-scroll-area {
+    max-height: 500px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(129,140,248,.75) rgba(255,255,255,.04);
+}
+
+.admin-scroll-area::-webkit-scrollbar {
+    width: 9px;
+}
+
+.admin-scroll-area::-webkit-scrollbar-track {
+    background: rgba(255,255,255,.035);
+    border-radius: 999px;
+    margin: 4px 0;
+}
+
+.admin-scroll-area::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #6366f1, #8b5cf6);
+    border-radius: 999px;
+    border: 2px solid rgba(13,17,39,.7);
+    min-height: 45px;
+}
+
+.admin-scroll-area::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #818cf8, #a78bfa);
+}
+
+.admin-scroll-area::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+@media (max-width: 700px) {
+    .admin-scroll-area {
+        max-height: 420px;
+        padding-right: 6px;
+    }
+}
+
 /* DOUGTUBE MODERATION */
 
 .video-moderation-item {
@@ -674,7 +717,7 @@ button:disabled {
         Loading...
     </div>
 
-    <div id="chatMessages"></div>
+    <div id="chatMessages" class="admin-scroll-area"></div>
 
 </div>
 
@@ -686,7 +729,7 @@ button:disabled {
         Loading...
     </div>
 
-    <div id="communityGames"></div>
+    <div id="communityGames" class="admin-scroll-area"></div>
 
 </div>
 
@@ -703,7 +746,7 @@ button:disabled {
         Loading DougTube videos...
     </div>
 
-    <div id="dougTubeVideos"></div>
+    <div id="dougTubeVideos" class="admin-scroll-area"></div>
 
 </div>
 
