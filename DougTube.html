@@ -487,13 +487,25 @@ main {
 
 .video-feed {
     display:
-        flex;
+        grid;
 
-    flex-direction:
-        column;
+    grid-template-columns:
+        repeat(2, minmax(0, 1fr));
 
     gap:
         18px;
+
+    max-height:
+        760px;
+
+    overflow-y:
+        auto;
+
+    padding:
+        4px;
+
+    scrollbar-width:
+        thin;
 }
 
 .video-card {
@@ -1653,6 +1665,14 @@ main {
             100%;
     }
 
+    .video-feed {
+        grid-template-columns:
+            1fr;
+
+        max-height:
+            760px;
+    }
+
     .video-card {
         grid-template-columns:
             1fr;
@@ -1867,6 +1887,8 @@ main {
         <div class="empty">
             Loading DougTube...
         </div>
+
+    </div>
 
     <!-- PHOTOS / MEDIA -->
     <section class="media-section" aria-label="DougTube photos and media">
