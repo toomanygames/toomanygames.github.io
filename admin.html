@@ -437,7 +437,7 @@ button:disabled {
 /* USERS GRID + SCROLL */
 #usersList {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     max-height: 500px;
     overflow-y: auto;
@@ -477,17 +477,46 @@ button:disabled {
     min-width: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 600px) {
     #usersList {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        max-height: 420px;
     }
 }
 
-@media (max-width: 600px) {
-    #usersList {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        max-height: 420px;
-    }
+/* MODERN COMMUNITY GAMES SCROLLBAR */
+#communityGames {
+    scrollbar-width: thin;
+    scrollbar-color: #7c83ff rgba(255,255,255,.045);
+    scroll-behavior: smooth;
+}
+
+#communityGames::-webkit-scrollbar {
+    width: 10px;
+}
+
+#communityGames::-webkit-scrollbar-track {
+    background: rgba(255,255,255,.035);
+    border: 1px solid rgba(255,255,255,.05);
+    border-radius: 999px;
+    margin: 6px 0;
+}
+
+#communityGames::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #6366f1, #a855f7);
+    border: 2px solid rgba(13,17,39,.8);
+    border-radius: 999px;
+    min-height: 55px;
+    box-shadow: 0 0 12px rgba(99,102,241,.2);
+}
+
+#communityGames::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #818cf8, #c084fc);
+    box-shadow: 0 0 16px rgba(139,92,246,.35);
+}
+
+#communityGames::-webkit-scrollbar-corner {
+    background: transparent;
 }
 
 /* DOUGTUBE MODERATION */
@@ -1933,6 +1962,33 @@ async function loadWarnings() {
         buttons.className =
             "buttons";
 
+        if (!warning.read_at) {
+            const readButton =
+                document.createElement("button");
+
+            readButton.type =
+                "button";
+
+            readButton.className =
+                "edit-button";
+
+            readButton.textContent =
+                "✓ Mark Read";
+
+            readButton.addEventListener(
+                "click",
+                function() {
+                    markWarningRead(
+                        warning.id
+                    );
+                }
+            );
+
+            buttons.appendChild(
+                readButton
+            );
+        }
+
         const deleteButton =
             document.createElement("button");
 
@@ -1999,6 +2055,38 @@ async function deleteWarning(id) {
 
         alert(
             "Could not delete the warning:\n\n" +
+            error.message
+        );
+
+        return;
+    }
+
+    await loadWarnings();
+}
+
+
+async function markWarningRead(id) {
+
+    const {
+        error
+    } =
+        await supabaseClient
+            .from("user_warnings")
+            .update({
+                read_at:
+                    new Date().toISOString()
+            })
+            .eq(
+                "id",
+                id
+            );
+
+    if (error) {
+
+        console.error(error);
+
+        alert(
+            "Could not mark the warning as read:\n\n" +
             error.message
         );
 
@@ -2159,12 +2247,6 @@ async function loadChatMessages() {
 
 
 async function deleteMessage(id) {
-
-    if (!confirm(
-        "Are you sure you want to delete this message?"
-    )) {
-        return;
-    }
 
     const {
         error
