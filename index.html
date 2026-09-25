@@ -2311,15 +2311,26 @@ async function checkChatNotification() {
         return;
     }
 
+    /* Get the logged-in user so your own messages never create a notification. */
+    const {
+        data: {
+            session
+        }
+    } =
+        await supabaseClient.auth.getSession();
+
+    const ownUserId =
+        session?.user?.id || null;
+
     const {
         data,
         error
     } =
         await supabaseClient
             .from("chat_messages")
-            .select("created_at")
+            .select("created_at,user_id")
             .order("created_at", { ascending: false })
-            .limit(1);
+            .limit(100);
 
     if (error) {
 
@@ -2331,8 +2342,16 @@ async function checkChatNotification() {
         return;
     }
 
+    /* Find the newest message sent by someone other than you. */
+    const latestOtherMessage =
+        (data || []).find(
+            message =>
+                !ownUserId ||
+                message.user_id !== ownUserId
+        );
+
     const latest =
-        data?.[0]?.created_at;
+        latestOtherMessage?.created_at;
 
     if (!latest) {
 
