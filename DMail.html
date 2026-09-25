@@ -1276,16 +1276,6 @@ async function renderMessages(messages) {
 
                 ${imageHtml}
 
-                <div class="admin-reply-row">
-                    <button
-                        class="admin-reply-button"
-                        type="button"
-                        data-reply-user="${escapeHtml(message.sender_id)}"
-                    >
-                        ↩ Reply
-                    </button>
-                </div>
-
                 <div class="message-time">
                     ${formatDate(message.created_at)}
                 </div>
@@ -1683,6 +1673,16 @@ async function loadOtherMessages() {
                 </div>
 
                 ${imageHtml}
+
+                <div class="admin-reply-row">
+                    <button
+                        class="admin-reply-button"
+                        type="button"
+                        data-reply-user="${escapeHtml(message.sender_id)}"
+                    >
+                        ↩ Reply
+                    </button>
+                </div>
 
             </div>
         `;
