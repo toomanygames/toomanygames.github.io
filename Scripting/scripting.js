@@ -177,8 +177,8 @@ async function loadGameForEditing() {
 
 let previewVersion = 0;
 
-const COMMUNITY_GAME_WIDTH = 1100;
-const COMMUNITY_GAME_HEIGHT = 742;
+const COMMUNITY_GAME_WIDTH = 1280;
+const COMMUNITY_GAME_HEIGHT = 720;
 
 
 /* =========================
@@ -372,6 +372,11 @@ function runGame() {
     newFrame.setAttribute(
         "scrolling",
         "no"
+    );
+
+    newFrame.setAttribute(
+        "sandbox",
+        "allow-scripts"
     );
 
 
