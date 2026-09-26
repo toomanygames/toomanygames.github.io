@@ -1867,6 +1867,18 @@ async function refreshDMail() {
     }
 
     await loadProfiles();
+
+    const replyTo =
+        new URLSearchParams(window.location.search).get("replyTo");
+
+    if (replyTo) {
+        const profile =
+            allProfiles.find(item => item.id === replyTo);
+
+        if (profile) {
+            await openConversation(profile);
+        }
+    }
 }
 
 setInterval(refreshDMail, 60000);
