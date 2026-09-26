@@ -2589,6 +2589,32 @@ submitPublish.addEventListener(
             return;
         }
 
+        const duration = await new Promise(resolve => {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.onloadedmetadata = () => {
+                URL.revokeObjectURL(video.src);
+                resolve(video.duration);
+            };
+            video.onerror = () => {
+                URL.revokeObjectURL(video.src);
+                resolve(null);
+            };
+            video.src = URL.createObjectURL(file);
+        });
+
+        if (duration === null || !Number.isFinite(duration)) {
+            status.textContent =
+                "Could not read the video duration.";
+            return;
+        }
+
+        if (duration > 10 * 60) {
+            status.textContent =
+                "That video is too long. The maximum is 10 minutes.";
+            return;
+        }
+
 
         submitPublish.disabled =
             true;
