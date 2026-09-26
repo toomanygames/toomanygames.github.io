@@ -216,6 +216,15 @@ button:hover {
     background: rgba(239,68,68,.25);
 }
 
+.reply {
+    background: rgba(99,102,241,.14);
+    border-color: rgba(129,140,248,.25);
+}
+
+.reply:hover {
+    background: rgba(99,102,241,.28);
+}
+
 .empty {
     padding: 35px;
 
@@ -538,6 +547,13 @@ async function loadFeedback() {
             <div class="actions">
 
                 <button
+                    class="reply"
+                    onclick="replyToFeedback(&quot;${item.user_id}&quot;)"
+                >
+                    ↩ Reply
+                </button>
+
+                <button
                     class="delete"
                     onclick="deleteFeedback('${item.id}')"
                 >
@@ -557,6 +573,14 @@ async function loadFeedback() {
 
 }
 
+
+function replyToFeedback(userId) {
+    if (!userId) {
+        alert("This feedback does not have a linked user.");
+        return;
+    }
+    window.location.href = "DMail.html?replyTo=" + encodeURIComponent(userId);
+}
 
 async function deleteFeedback(id) {
 
