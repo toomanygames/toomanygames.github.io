@@ -18,6 +18,7 @@
 >
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/tus-js-client@4.3.1/dist/tus.min.js"></script>
 
 <style>
 
@@ -2133,12 +2134,12 @@ main {
         </div>
 
         <div class="field">
-            <label for="mediaFile">Photo</label>
-            <input id="mediaFile" class="file-input" type="file" accept="image/*">
+            <label for="mediaFile">Photo or MP3 Audio</label>
+            <input id="mediaFile" class="file-input" type="file" accept="image/*,audio/mpeg,audio/mp3">
         </div>
 
         <div class="field">
-            <label for="mediaTitle">Photo Name</label>
+            <label for="mediaTitle">Post Name</label>
             <input id="mediaTitle" type="text" maxlength="120" placeholder="Give your photo a name...">
         </div>
 
@@ -2151,7 +2152,7 @@ main {
 
         <div class="publish-actions">
             <button id="mediaCancelPublish" class="cancel-publish" type="button">Cancel</button>
-            <button id="mediaSubmitPublish" class="submit-publish" type="button">Post Photo</button>
+            <button id="mediaSubmitPublish" class="submit-publish" type="button">Post Media</button>
         </div>
     </div>
 </div>
@@ -2581,10 +2582,10 @@ submitPublish.addEventListener(
         }
 
 
-        if (file.size > 200 * 1024 * 1024) {
+        if (file.size > 1024 * 1024 * 1024) {
 
             status.textContent =
-                "That video is too large. The maximum is 200 MB.";
+                "That video is too large. The maximum is 1 GB.";
 
             return;
         }
@@ -2618,6 +2619,106 @@ submitPublish.addEventListener(
 
             status.textContent =
                 "Uploading video...";
+
+
+            if (!window.tus || !window.tus.Upload) {
+                throw new Error("The resumable upload system could not load. Please refresh and try again.");
+            }
+
+
+            const {
+                data: sessionData
+            } = await supabaseClient.auth.getSession();
+
+            const accessToken =
+                sessionData?.session?.access_token;
+
+            if (!accessToken) {
+                throw new Error("Your login session expired. Please log in again.");
+            }
+
+
+            await new Promise(function(resolve, reject) {
+
+                const upload =
+                    new tus.Upload(file, {
+                        endpoint:
+                            "https://agsqdqcsmsppcdqxlppj.storage.supabase.co/storage/v1/upload/resumable",
+
+                        retryDelays:
+                            [0, 3000, 5000, 10000, 20000],
+
+                        headers: {
+                            authorization:
+                                "Bearer " + accessToken,
+
+                            apikey:
+                                SUPABASE_KEY
+                        },
+
+                        uploadDataDuringCreation:
+                            true,
+
+                        removeFingerprintOnSuccess:
+                            true,
+
+                        chunkSize:
+                            6 * 1024 * 1024,
+
+                        metadata: {
+                            bucketName:
+                                VIDEO_BUCKET,
+
+                            objectName:
+                                filePath,
+
+                            contentType:
+                                file.type || "video/mp4",
+
+                            cacheControl:
+                                "3600"
+                        },
+
+                        onError:
+                            function(error) {
+                                reject(error);
+                            },
+
+                        onProgress:
+                            function(bytesUploaded, bytesTotal) {
+                                const percent =
+                                    Math.floor(
+                                        (bytesUploaded / bytesTotal) * 100
+                                    );
+
+                                status.textContent =
+                                    "Uploading video... " +
+                                    percent +
+                                    "%";
+                            },
+
+                        onSuccess:
+                            function() {
+                                resolve();
+                            }
+                    });
+
+
+                upload.findPreviousUploads()
+                    .then(function(previousUploads) {
+
+                        if (previousUploads.length) {
+                            upload.resumeFromPreviousUpload(
+                                previousUploads[0]
+                            );
+                        }
+
+                        upload.start();
+
+                    })
+                    .catch(reject);
+
+            });
 
 
             const {
@@ -2795,9 +2896,15 @@ mediaSubmitPublish.addEventListener("click",async function(){
         return;
     }
 
-    const allowedTypes=["image/jpeg","image/png","image/webp","image/gif"];
-    if(!allowedTypes.includes(file.type)){
-        status.textContent="Please choose a JPG, PNG, WebP, or GIF image.";
+    const isImage =
+        ["image/jpeg","image/png","image/webp","image/gif"].includes(file.type);
+
+    const isMp3 =
+        file.type === "audio/mpeg" ||
+        file.name.toLowerCase().endsWith(".mp3");
+
+    if(!isImage && !isMp3){
+        status.textContent="Please choose a JPG, PNG, WebP, GIF image, or MP3 audio file.";
         return;
     }
 
@@ -2806,8 +2913,16 @@ mediaSubmitPublish.addEventListener("click",async function(){
         return;
     }
 
-    if(file.size>10*1024*1024){
-        status.textContent="That photo is too large. The maximum is 10 MB.";
+    const maxMediaSize =
+        isMp3
+            ? 100 * 1024 * 1024
+            : 10 * 1024 * 1024;
+
+    if(file.size>maxMediaSize){
+        status.textContent =
+            isMp3
+                ? "That MP3 is too large. The maximum is 100 MB."
+                : "That photo is too large. The maximum is 10 MB.";
         return;
     }
 
@@ -2880,18 +2995,18 @@ mediaSubmitPublish.addEventListener("click",async function(){
         status.textContent=error.message||"Could not post the photo.";
     }finally{
         mediaSubmitPublish.disabled=false;
-        mediaSubmitPublish.textContent="Post Photo";
+        mediaSubmitPublish.textContent="Post Media";
     }
 });
 
 async function loadMediaPosts(){
     const feed=document.getElementById("mediaFeed");
 
-    feed.innerHTML='<div class="empty media-empty">Loading photos...</div>';
+    feed.innerHTML='<div class="empty media-empty">Loading photos and audio...</div>';
 
     const {data,error}=await supabaseClient
         .from("dougtube_media")
-        .select("id, creator_id, title, description, media_url, created_at")
+        .select("id, creator_id, title, description, media_url, media_type, created_at")
         .order("created_at",{ascending:false});
 
     if(error){
@@ -2903,7 +3018,7 @@ async function loadMediaPosts(){
     mediaPosts=data||[];
 
     if(!mediaPosts.length){
-        feed.innerHTML='<div class="empty media-empty">No photos have been posted yet.</div>';
+        feed.innerHTML='<div class="empty media-empty">No media has been posted yet.</div>';
         return;
     }
 
@@ -2918,23 +3033,17 @@ async function buildMediaCard(post){
         .select("id",{count:"exact",head:true})
         .eq("media_id",post.id);
 
-    if(likeCountError){
-        console.error("Media like count error:",likeCountError);
-    }
+    if(likeCountError) console.error("Media like count error:",likeCountError);
 
     let liked=false;
 
     if(currentUser){
-        const {data:existingLike,error:existingLikeError}=await supabaseClient
+        const {data:existingLike}=await supabaseClient
             .from("dougtube_media_likes")
             .select("id")
             .eq("media_id",post.id)
             .eq("user_id",currentUser.id)
             .maybeSingle();
-
-        if(existingLikeError){
-            console.error("Media like lookup error:",existingLikeError);
-        }
 
         liked=!!existingLike;
     }
@@ -2945,9 +3054,7 @@ async function buildMediaCard(post){
         .eq("media_id",post.id)
         .order("created_at",{ascending:true});
 
-    if(commentsError){
-        console.error("Media comments error:",commentsError);
-    }
+    if(commentsError) console.error("Media comments error:",commentsError);
 
     const commentHtml=(comments||[]).length
         ?comments.map(function(comment){
@@ -2965,15 +3072,17 @@ async function buildMediaCard(post){
           '</div>'
         :'<div class="media-note">Log in to comment.</div>';
 
+    const mediaType=post.media_type==="audio"?"audio":"image";
+    const visual=mediaType==="audio"
+        ?'<div class="media-image-wrap media-audio-wrap"><audio class="media-audio" controls preload="metadata" src="'+escapeHtml(post.media_url)+'"></audio></div>'
+        :'<div class="media-image-wrap"><img class="media-image" src="'+escapeHtml(post.media_url)+'" alt="'+escapeHtml(post.title||"DougHub photo")+'" loading="lazy"></div>';
+
     return '<article class="media-card">'+
-        '<div class="media-image-wrap">'+
-        '<img class="media-image" src="'+escapeHtml(post.media_url)+'" alt="'+escapeHtml(post.title||"DougTube photo")+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\';">'+
-        '<div class="media-image-fallback" style="display:none;">This photo could not be displayed.</div>'+
-        '</div>'+
+        visual+
         '<div class="media-info">'+
-        '<h3 class="media-title">'+escapeHtml(post.title||"Untitled Photo")+'</h3>'+
+        '<h3 class="media-title">'+escapeHtml(post.title||"Untitled Media")+'</h3>'+
         '<p class="media-description">'+escapeHtml(post.description||"No description.")+'</p>'+
-        '<div class="media-meta"><span>'+formatDate(post.created_at)+'</span><span>Photo</span></div>'+
+        '<div class="media-meta"><span>'+formatDate(post.created_at)+'</span><span>'+(mediaType==="audio"?"MP3 Audio":"Photo")+'</span></div>'+
         '<div class="media-actions">'+
         '<button class="media-like-button'+(liked?" liked":"")+'" data-media-like="'+escapeHtml(post.id)+'" type="button">'+(liked?"👍 Liked":"👍 Like")+'</button>'+
         '<span class="media-like-count" data-media-like-count="'+escapeHtml(post.id)+'">'+Number(likeCount||0).toLocaleString()+" likes</span>"+
@@ -2981,7 +3090,6 @@ async function buildMediaCard(post){
         '<div class="media-comments"><div class="media-comment-list">'+commentHtml+'</div>'+commentArea+'</div>'+
         '</div></article>';
 }
-
 function attachMediaEvents(){
     document.querySelectorAll("[data-media-like]").forEach(function(button){
         button.addEventListener("click",function(){
