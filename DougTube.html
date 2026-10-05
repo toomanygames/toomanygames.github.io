@@ -2967,7 +2967,8 @@ mediaSubmitPublish.addEventListener("click",async function(){
                 creator_id:currentUser.id,
                 title:title,
                 description:description||null,
-                media_url:mediaUrl
+                media_url:mediaUrl,
+                media_type:isMp3 ? "audio" : "image"
             });
 
         if(databaseError) throw databaseError;
