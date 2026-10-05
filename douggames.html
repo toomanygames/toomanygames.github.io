@@ -2633,13 +2633,23 @@ async function openCommunityGame(
             game.title ||
             "Game";
 
-    document
-        .getElementById(
+    const gameFrame =
+        document.getElementById(
             "gameFrame"
-        )
-        .srcdoc =
-            game.code ||
-            "<h1>No game code</h1>";
+        );
+
+    gameFrame.srcdoc =
+        game.code ||
+        "<h1>No game code</h1>";
+
+    gameFrame.onload =
+        function() {
+            try {
+                gameFrame.focus();
+            } catch (error) {
+                console.debug("Could not focus community game:", error);
+            }
+        };
 
     document
         .getElementById(
