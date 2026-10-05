@@ -2892,7 +2892,7 @@ mediaSubmitPublish.addEventListener("click",async function(){
     status.textContent="";
 
     if(!file){
-        status.textContent="Please choose a photo.";
+        status.textContent="Please choose an image or MP3 audio file.";
         return;
     }
 
@@ -2909,7 +2909,7 @@ mediaSubmitPublish.addEventListener("click",async function(){
     }
 
     if(!title){
-        status.textContent="Please give your photo a name.";
+        status.textContent="Please give your media a name.";
         return;
     }
 
@@ -2936,7 +2936,7 @@ mediaSubmitPublish.addEventListener("click",async function(){
         const filePath=currentUser.id+"/"+Date.now()+"-"+crypto.randomUUID()+"."+extension;
         uploadedPath=filePath;
 
-        status.textContent="Uploading photo...";
+        status.textContent=isMp3 ? "Uploading MP3..." : "Uploading photo...";
 
         const {error:uploadError}=await supabaseClient
             .storage
