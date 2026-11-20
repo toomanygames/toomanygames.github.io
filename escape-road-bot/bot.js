@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.4.0';
+window.ERBOT_VERSION = '1.6.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -796,8 +796,10 @@ function policy(fv){
   return { '-1': v['-1']/tot, '0': v['0']/tot, '1': v['1']/tot, near: Math.sqrt(best[0][0]) };
 }
 E.policy = policy;
-function addSample(fv, u, w){
-  S.samples.push({ f: fv.map(x => +x.toFixed(3)), u, w: +w.toFixed(3) });
+const outbox = [];   // new lessons to share with the other games when several play at once
+function addSample(fv, u, w, shared){
+  const smp = { f: fv.map(x => +x.toFixed(3)), u, w: +w.toFixed(3) };
+  S.samples.push(smp); if (!shared && window.__erbHub) outbox.push(smp);
   if (S.samples.length > 12000) { const idx = S.samples.findIndex(s => s.w < 0.9); S.samples.splice(idx >= 0 ? idx : 0, 1); }
 }
 
@@ -992,8 +994,27 @@ E.onRunEnd = (dur) => {
   S.trial = newTrial(); applyCfg(S.trial);
   E._humanAtStart = S.humanSamples;
   save(true);
+  hubSend({ run: S.runs[S.runs.length - 1], points, best: S.best, bestScore: S.bestScore });
 };
 E._humanAtStart = S.humanSamples;
+
+/* ---------------- several games at once: share what each one learns ---------------- */
+function hubSend(extra){
+  if (!window.__erbHub) return;
+  const msg = Object.assign({ from: window.__erbWorker || 0, samples: outbox.splice(0) }, extra || {});
+  if (!msg.samples.length && !msg.run) return;
+  try { window.__erbHub.push(JSON.stringify(msg)); } catch (e) {}
+}
+setInterval(() => hubSend(), 10000);   // lessons from you driving go out even mid-run
+E.mergeDelta = d => {
+  for (const s of d.samples || []) if (s && s.f && s.f.length === 31) addSample(s.f, s.u, s.w, true);
+  if (d.samples && d.samples.some(s => s.w >= 0.99)) S.humanSamples += d.samples.filter(s => s.w >= 0.99).length;
+  if (d.run) { S.runs.push(d.run); if (S.runs.length > 300) S.runs.shift(); S.careerPoints = (S.careerPoints || 0) + Math.max(0, d.points || 0); S.bestPoints = Math.max(S.bestPoints || 0, d.points || 0); }
+  // another game found better settings: use them as the new starting point
+  if (d.best && d.bestScore != null && (S.bestScore === null || d.bestScore > S.bestScore + 5)) { S.best = { ...d.best }; S.bestScore = d.bestScore; }
+  if (E.v4 && E.v4.learner) E.v4.learner.dirty = true;
+  save();
+};
 
 /* ---------------- levels (just for fun) ---------------- */
 const LEVELS = [[0,'Rookie'],[500,'Getaway Driver'],[2000,'Wheelman'],[5000,'Road Runner'],[12000,'Ghost'],[30000,'Legend']];
@@ -1610,6 +1631,14 @@ const G = E.G, S = E.brain;
 const cfg = Object.assign({}, V4.DEFAULTS);
 E.v4cfg = cfg;
 E.cfg.goalPull = E.cfg.goalPull || 0.12;
+// play style chosen in the Trainer (Learning > Open the trainer)
+try {
+  const st = JSON.parse(localStorage.getItem('erbot_v4_config') || 'null');
+  if (st) {
+    for (const k of ['priority', 'bagDetourMax', 'bagAngleMax', 'bagSafeCopDist', 'copPredictS', 'escMomentum', 'escCopW', 'wallMargin', 'copAvoidRadius']) if (st[k] !== undefined) cfg[k] = st[k];
+    if (typeof st.goalPull === 'number') E.cfg.goalPull = st.goalPull;
+  }
+} catch (e) {}
 
 /* ---- the map the route planner works on: 2 m blocks read from the live 3D view (+ learned city pieces) */
 const CS = 2;
