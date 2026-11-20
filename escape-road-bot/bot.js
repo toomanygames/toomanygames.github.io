@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.2.0';
+window.ERBOT_VERSION = '1.3.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -544,15 +544,64 @@ function findCloseButton(im){
   return { x: cl.reduce((s, q) => s + q[0], 0)/cl.length/W, y: cl.reduce((s, q) => s + q[1], 0)/cl.length/H };
 }
 
-/* ---------- 10. HUD ---------- */
-const hud = document.createElement('div');
-hud.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:4px;z-index:99999;font:12px/1.3 monospace;color:#fff;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;pointer-events:none;white-space:pre';
-document.body.appendChild(hud);
-B.toggleHud = () => { hud.style.display = hud.style.display === 'none' ? 'block' : 'none'; };
+/* ---------- 10. HUD: status bar along the bottom, H shows what each stat means ---------- */
+const hudCss = document.createElement('style');
+hudCss.textContent = `
+#erb-hud{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;z-index:99999;max-width:98vw;display:flex;flex-wrap:wrap;justify-content:center;gap:4px;pointer-events:none;font:600 clamp(12px,1.55vw,17px)/1.25 system-ui,Segoe UI,Arial,sans-serif}
+#erb-hud span{background:rgba(0,0,0,.72);color:#fff;padding:2px 8px;border-radius:7px;white-space:nowrap;text-shadow:0 1px 2px #000}
+#erb-hud span.on{background:rgba(20,140,60,.9)}
+#erb-hud span.off{background:rgba(160,30,30,.9)}
+#erb-hud span.hint{background:rgba(0,0,0,.45);color:#ffd84d}
+#erb-help{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:99999;width:min(96vw,1100px);max-height:80vh;overflow:auto;background:rgba(10,14,24,.93);color:#fff;border:2px solid #ffd84d;border-radius:12px;padding:10px 14px;pointer-events:none;font:clamp(12px,1.45vw,16px)/1.35 system-ui,Segoe UI,Arial,sans-serif;display:none}
+#erb-help h3{margin:0 0 6px;font-size:1.15em;color:#ffd84d}
+#erb-help div.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:5px 18px}
+#erb-help div.g>div{display:flex;gap:8px}
+#erb-help b{color:#7fe3ff;white-space:nowrap;flex:0 0 auto}
+#erb-help p{margin:8px 0 0;color:#bbb;font-size:.92em}`;
+document.head.appendChild(hudCss);
+const hud = document.createElement('div'); hud.id = 'erb-hud'; document.body.appendChild(hud);
+const help = document.createElement('div'); help.id = 'erb-help';
+const HELP = [
+  ['ERBot ON/off', 'Is the bot driving? (F8)'],
+  ['play / menu / over', 'Game screen: driving, start menu, game over.'],
+  ['runs', 'Attempts finished this session.'],
+  ['now', 'Time in the current run.'],
+  ['best', 'Longest run this session.'],
+  ['points', 'Score this run: speed and staying alive add points, cash +25, crash −8, stuck −2/s, caught −30.'],
+  ['(best …)', 'Its highest score ever.'],
+  ['Rookie…Legend', 'Rank from all points ever: 500 Getaway Driver, 2k Wheelman, 5k Road Runner, 12k Ghost, 30k Legend.'],
+  ['+25 cash / −8 crash', 'Pops up when the score changes.'],
+  ['LEARNING FROM YOU', 'You’re steering (A/D, arrows, S brake); it copies you.'],
+  ['lessons', 'Moments learned from your driving.'],
+  ['attempts', 'Past runs it learned from.'],
+  ['city pieces learned', 'Map pieces it knows, to plan around unseen walls.'],
+  ['on foot', 'Out of the car, getting back in.'],
+  ['backing up', 'Stuck, reversing out.'],
+  ['car damaged / swaps', 'Car smoking or burning: switching cars.'],
+  ['new cars won', 'Won on the slot machine; it drives your rarest car.'],
+  ['rewards claimed', 'Free rewards collected.'],
+  ['gave up stuck runs', 'Runs it ended because it got stuck.'],
+  ['err', 'Internal error (it keeps going).'],
+];
+help.innerHTML = '<h3>What the stats mean</h3><div class="g">' + HELP.map(([k, v]) => `<div><b>${k}</b><span>${v}</span></div>`).join('') + '</div><p>H: show / hide this help · F9 or J: show / hide the status bar · F8: bot on / off</p>';
+document.body.appendChild(help);
+B.toggleHud = () => { const hide = hud.style.display !== 'none'; hud.style.display = hide ? 'none' : 'flex'; if (hide) help.style.display = 'none'; };
+B.toggleHelp = () => { const show = help.style.display !== 'block'; help.style.display = show ? 'block' : 'none'; if (show) hud.style.display = 'flex'; };
+window.addEventListener('keydown', e => {
+  if (!e.isTrusted || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (e.key === 'h' || e.key === 'H') B.toggleHelp();
+  else if (e.key === 'j' || e.key === 'J' || e.key === 'F9') { if (e.key === 'F9' && window.__erbApp) return; B.toggleHud(); }
+}, true);
 const fmt = s => { s = Math.floor(s); return Math.floor(s/60) + ':' + String(s%60).padStart(2, '0'); };
+const esc = t => t.replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[c]);
+let lastHud = '';
 function updateHud(){
   const S = B.stats; const cur = B.mode === 'play' && S.runStart ? (performance.now() - S.runStart)/1000 : 0;
-  hud.textContent = `ERBot ${B.enabled ? 'ON' : 'off'} | ${B.mode} | runs ${S.runs} | now ${fmt(cur)} | best ${fmt(S.best)}` + (B.hudExtra ? B.hudExtra() : '') + (B.err ? ' | err' : '');
+  const text = `ERBot ${B.enabled ? 'ON' : 'off'} | ${B.mode} | runs ${S.runs} | now ${fmt(cur)} | best ${fmt(S.best)}` + (B.hudExtra ? B.hudExtra() : '') + (B.err ? ' | err' : '');
+  if (text === lastHud) return; lastHud = text;
+  const parts = text.split(' | ');
+  hud.innerHTML = parts.map((t, i) => `<span${i === 0 ? ` class="${B.enabled ? 'on' : 'off'}"` : ''}>${esc(t)}</span>`).join('') + '<span class="hint">H = help</span>';
 }
 B.updateHud = updateHud;
 
@@ -592,7 +641,7 @@ async function supervise(){
 }
 B.start = () => { B.enabled = true; supervise(); };
 B.stop = () => { B.enabled = false; B.releaseAll(); };
-B.shutdown = () => { B.stop(); B.alive = false; hud.remove(); };
+B.shutdown = () => { B.stop(); B.alive = false; hud.remove(); help.remove(); hudCss.remove(); };
 updateHud();
 })();
 
