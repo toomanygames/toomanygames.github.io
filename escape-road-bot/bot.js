@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.3.0';
+window.ERBOT_VERSION = '1.4.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -575,6 +575,9 @@ const HELP = [
   ['lessons', 'Moments learned from your driving.'],
   ['attempts', 'Past runs it learned from.'],
   ['city pieces learned', 'Map pieces it knows, to plan around unseen walls.'],
+  ['heading for cash / open road', 'Where its route goes: a cash stack, or open road away from where the cops are heading.'],
+  ['brain % trained', 'How far its driving brain (a small neural net) has trained on your driving and its attempts.'],
+  ['getting unstuck / out of water', 'Backing up to the last dry road it drove on, or driving to open road.'],
   ['on foot', 'Out of the car, getting back in.'],
   ['backing up', 'Stuck, reversing out.'],
   ['car damaged / swaps', 'Car smoking or burning: switching cars.'],
@@ -884,6 +887,7 @@ E.planSteer = function(p, groundY, steerState, pol, car){
     score -= (u1 !== 0 ? C.steerW : 0) + (u1 !== E.u ? C.switchW : 0) + (brake !== (E.b || 0) ? 0.05 : 0);
     if (others.length) { let rep = 0; for (const o of others) { const d = Math.hypot(o.x - x, o.z - z); rep += 1/(1 + d*d*0.02); } score -= rep * C.crowdW; }
     if (tg.length && alive) { let bd = 1e9; for (let i = 0; i < tg.length; i++) if (!got.has(i)) bd = Math.min(bd, Math.hypot(tg[i].x - x, tg[i].z - z)); if (bd < 1e9) score -= C.bagPull * Math.min(bd, 60); }
+    if (E.goal && alive) score -= (C.goalPull || 0) * Math.min(Math.hypot(E.goal.x - x, E.goal.z - z), 30);   // follow the route
     if (pol) score += C.imitW * Math.log(pol[u1] * 3);
     if (!best || score > best.score) best = { u1, t1, u2, brake, score, alive, tDie, pts, gain };
   }
@@ -945,7 +949,7 @@ E.think = function(f){
   const pol = policy(fv);
   let plan = E.planSteer(p, gy, E.steerState, pol, car);
   // stuck against something: back up (S) while turning toward open space, then go again
-  if (p.speed < 2 && !(E.footState && E.footState.on)) { if (!stuckSince) stuckSince = f.t; } else stuckSince = 0;
+  if (p.speed < 2 && !(E.footState && E.footState.on) && !E.v4owned) { if (!stuckSince) stuckSince = f.t; } else stuckSince = 0;
   if (stuckSince && f.t - stuckSince > 900 && f.t > reverseUntil + 1500) { reverseUntil = f.t + 900; E._revDir = rayDist(p, p.th + 1.2, 16) > rayDist(p, p.th - 1.2, 16) ? 1 : -1; }
   if (f.t < reverseUntil) { E.steer(E._revDir); E.brake(true); E.plan = { reversing: true }; return; }
   E.plan = plan;
@@ -1307,6 +1311,407 @@ E.beforeRun = async () => {
 };
 const prevHud = E.hudExtra;
 E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.spins}` : '') + (E.claimed ? ` | rewards claimed ${E.claimed}` : '');
+})();
+
+/* ERBot v4 core: the parts of the other chat's erbot-v4.js (project doc claude/erbot-v4.js)
+ * that the app uses, unchanged in behaviour:
+ *   PolicyNet + Learner  small neural net (no copycat input, learns to avoid crash moves)
+ *   Planner              time-sliced A* route planner
+ *   BagMemory            remembers where cash was seen
+ *   GoalChooser          picks a bag or an escape point away from where the cops are heading
+ *   Recovery             gets out of water / unstuck by heading for the last dry road
+ * The map it plans on is supplied by combine.js (built from the live 3D view). */
+(function (root) {
+  'use strict';
+  const DEFAULTS = {
+    plannerShareMs: 1.0, replanEveryMs: 400, maxExpansionsPerSlice: 1200,
+    copAvoidRadius: 14, bagMergeRadius: 4, bagViewRadius: 45,
+    hidden: 32, learnRate: 0.003, l2: 0.03, epochs: 30,
+    priority: 'money', bagDetourMax: 55, bagAngleMax: 0.9, bagSafeCopDist: 28,
+    copPredictS: 1.0, escMomentum: 2.5, escCopW: 0.083, escRadii: [18, 28],
+    wallMargin: 3, steerGain: 1.8,
+    stuckSpeed: 1.5, stuckMs: 1200, reverseMs: 900, escapeMs: 3500, landSearchCells: 12,
+  };
+  const now = () => performance.now();
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  function mulberry32(a) { return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // features: drop f[15] (current steering = copycat cause), angle -> sin/cos
+  function prep(f) {
+    const x = new Float32Array(31); let k = 0;
+    for (let i = 0; i <= 12; i++) x[k++] = f[i];
+    x[k++] = Math.sin(f[13]); x[k++] = Math.cos(f[13]); x[k++] = f[14];
+    for (let i = 16; i <= 30; i++) x[k++] = f[i];
+    return x;
+  }
+  const N_IN = 31;
+
+  class PolicyNet {
+    constructor(nIn, nH, seed = 1) {
+      this.nIn = nIn; this.nH = nH;
+      const r = mulberry32(seed), s1 = 1 / Math.sqrt(nIn), s2 = 1 / Math.sqrt(nH);
+      this.W1 = Float32Array.from({ length: nIn * nH }, () => (r() * 2 - 1) * s1); this.b1 = new Float32Array(nH);
+      this.W2 = Float32Array.from({ length: nH * 3 }, () => (r() * 2 - 1) * s2); this.b2 = new Float32Array(3);
+      this.mean = new Float32Array(nIn); this.std = new Float32Array(nIn).fill(1);
+      this._adam = null; this.t = 0; this.h = new Float32Array(nH); this.p = new Float32Array(3);
+    }
+    setNorm(X) {
+      const n = X.length, d = this.nIn, m = new Float64Array(d), v = new Float64Array(d);
+      for (const x of X) for (let j = 0; j < d; j++) m[j] += x[j];
+      for (let j = 0; j < d; j++) m[j] /= n;
+      for (const x of X) for (let j = 0; j < d; j++) v[j] += (x[j] - m[j]) ** 2;
+      for (let j = 0; j < d; j++) { this.mean[j] = m[j]; this.std[j] = Math.max(0.05, Math.sqrt(v[j] / n)); }
+    }
+    forward(x) {
+      const { nIn, nH, W1, b1, W2, b2, h, p, mean, std } = this;
+      for (let j = 0; j < nH; j++) { let s = b1[j]; for (let i = 0; i < nIn; i++) s += ((x[i] - mean[i]) / std[i]) * W1[i * nH + j]; h[j] = Math.tanh(s); }
+      let mx = -1e9;
+      for (let k = 0; k < 3; k++) { let s = b2[k]; for (let j = 0; j < nH; j++) s += h[j] * W2[j * 3 + k]; p[k] = s; if (s > mx) mx = s; }
+      let z = 0; for (let k = 0; k < 3; k++) { p[k] = Math.exp(p[k] - mx); z += p[k]; }
+      for (let k = 0; k < 3; k++) p[k] /= z;
+      return p;
+    }
+    trainBatch(batch, lr, l2) {
+      const { nIn, nH, W1, W2, mean, std } = this;
+      const gW1 = new Float32Array(W1.length), gb1 = new Float32Array(nH), gW2 = new Float32Array(W2.length), gb2 = new Float32Array(3);
+      const xn = new Float32Array(nIn), dh = new Float32Array(nH); let loss = 0;
+      for (const s of batch) {
+        for (let i = 0; i < nIn; i++) xn[i] = (s.x[i] - mean[i]) / std[i];
+        const p = this.forward(s.x), h = this.h, k = s.k, dz = [0, 0, 0];
+        if (s.w >= 0) { loss -= s.w * Math.log(p[k] + 1e-7); for (let c = 0; c < 3; c++) dz[c] = s.w * (p[c] - (c === k ? 1 : 0)); }
+        else { const a = -s.w, q = Math.max(1e-6, 1 - p[k]); loss -= a * Math.log(q); for (let c = 0; c < 3; c++) dz[c] = a * (p[k] / q) * ((c === k ? 1 : 0) - p[c]); }
+        for (let c = 0; c < 3; c++) gb2[c] += dz[c];
+        for (let j = 0; j < nH; j++) { let g = 0; for (let c = 0; c < 3; c++) { gW2[j * 3 + c] += h[j] * dz[c]; g += W2[j * 3 + c] * dz[c]; } dh[j] = g * (1 - h[j] * h[j]); gb1[j] += dh[j]; }
+        for (let i = 0; i < nIn; i++) { const xi = xn[i]; if (xi === 0) continue; const row = i * nH; for (let j = 0; j < nH; j++) gW1[row + j] += xi * dh[j]; }
+      }
+      this._step([this.W1, this.b1, this.W2, this.b2], [gW1, gb1, gW2, gb2], batch.length, lr, l2);
+      return loss / batch.length;
+    }
+    _step(P, G, n, lr, l2) {
+      if (!this._adam) this._adam = P.map(p => [new Float32Array(p.length), new Float32Array(p.length)]);
+      this.t++; const b1 = 0.9, b2 = 0.999, c1 = 1 - b1 ** this.t, c2 = 1 - b2 ** this.t;
+      P.forEach((p, idx) => { const [m, v] = this._adam[idx], g = G[idx];
+        for (let i = 0; i < p.length; i++) { const gi = g[i] / n + l2 * p[i]; m[i] = b1 * m[i] + (1 - b1) * gi; v[i] = b2 * v[i] + (1 - b2) * gi * gi; p[i] -= (lr * (m[i] / c1)) / (Math.sqrt(v[i] / c2) + 1e-8); } });
+    }
+    toJSON() { const a = x => Array.from(x, v => Math.round(v * 1e5) / 1e5); return { nIn: this.nIn, nH: this.nH, W1: a(this.W1), b1: a(this.b1), W2: a(this.W2), b2: a(this.b2), mean: a(this.mean), std: a(this.std), t: this.t }; }
+    static fromJSON(o) { const n = new PolicyNet(o.nIn, o.nH); for (const k of ['W1', 'b1', 'W2', 'b2', 'mean', 'std']) n[k] = Float32Array.from(o[k]); n.t = 0; return n; }
+  }
+
+  // trains the net on the brain's samples (w > 0: do this, w < 0: avoid this), a few ms per frame
+  class Learner {
+    constructor(cfg, brain) {
+      this.cfg = cfg; this.brain = brain; this.rand = mulberry32(7);
+      this.net = brain.v4net && brain.v4net.nIn === N_IN ? PolicyNet.fromJSON(brain.v4net) : new PolicyNet(N_IN, cfg.hidden);
+      this.trained = !!brain.v4net; this.epochs = brain.v4epochs || 0; this.dirty = true; this._order = null; this._pos = 0;
+    }
+    rebuild() {
+      const data = [];
+      for (const s of this.brain.samples || []) if (s.f && s.f.length === 31) data.push({ x: prep(s.f), k: s.u + 1, w: s.w });
+      this.data = data;
+      if (this.targetEpochs === undefined) this.targetEpochs = this.trained ? this.epochs + 4 : this.cfg.epochs;
+      else this.targetEpochs = Math.max(this.targetEpochs, this.epochs + 8);
+      if (!this.trained && data.length) this.net.setNorm(data.map(d => d.x));
+      this._order = null; this.dirty = false;
+    }
+    trainTick(budgetMs) {
+      if (this.dirty) this.rebuild();
+      const t0 = now();
+      if (!this.data || this.data.length < 50 || this.epochs >= this.targetEpochs) return 0;
+      while (now() - t0 < budgetMs) {
+        if (!this._order || this._pos >= this._order.length) {
+          const o = this._order = Uint32Array.from(this.data.keys());
+          for (let i = o.length - 1; i > 0; i--) { const j = (this.rand() * (i + 1)) | 0; [o[i], o[j]] = [o[j], o[i]]; }
+          this._pos = 0; this.epochs++;
+          if (this.epochs >= this.targetEpochs) break;
+        }
+        const batch = []; for (let i = 0; i < 32 && this._pos < this._order.length; i++) batch.push(this.data[this._order[this._pos++]]);
+        if (!batch.length) continue;
+        this.lastLoss = this.net.trainBatch(batch, this.cfg.learnRate * (this.epochs > 20 ? 0.4 : 1), this.cfg.l2);
+        this.trained = true;
+      }
+      return now() - t0;
+    }
+    policy(f) { return this.net.forward(prep(f)); }
+    save() { this.brain.v4net = this.net.toJSON(); this.brain.v4epochs = this.epochs; }
+  }
+
+  // ---- A* (time-sliced) on any grid with toCell/toWorld/cost
+  class Heap {
+    constructor() { this.k = []; this.v = []; }
+    get size() { return this.k.length; }
+    push(key, val) { const k = this.k, v = this.v; let i = k.length; k.push(key); v.push(val); while (i > 0) { const p = (i - 1) >> 1; if (k[p] <= key) break; k[i] = k[p]; v[i] = v[p]; i = p; } k[i] = key; v[i] = val; }
+    pop() { const k = this.k, v = this.v, top = v[0], lk = k.pop(), lv = v.pop(), n = k.length;
+      if (n) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && k[c + 1] < k[c]) c++; if (k[c] >= lk) break; k[i] = k[c]; v[i] = v[c]; i = c; } k[i] = lk; v[i] = lv; }
+      return top; }
+  }
+  const KEY = (x, z) => (x + 32768) * 65536 + (z + 32768);
+  const KX = k => Math.floor(k / 65536) - 32768, KZ = k => (k % 65536) - 32768;
+  const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
+  class Planner {
+    constructor(cfg, grid) { this.cfg = cfg; this.grid = grid; this.job = null; this.path = null; this.stats = { plans: 0, fails: 0 }; }
+    start(from, to, cops, maxNodes = 6000) {
+      const g = this.grid, [sx, sz] = g.toCell(from.x, from.z), [tx, tz] = g.toCell(to.x, to.z);
+      this.job = { tx, tz, open: new Heap(), gs: new Map(), par: new Map(), closed: new Set(), copCells: (cops || []).map(c => g.toCell(c.x, c.z)), copR: this.cfg.copAvoidRadius / g.size, exp: 0, maxNodes, best: null, bestH: 1e9 };
+      const k = KEY(sx, sz); this.job.gs.set(k, 0); this.job.open.push(this.h(sx, sz), k);
+    }
+    h(x, z) { const j = this.job, dx = Math.abs(x - j.tx), dz = Math.abs(z - j.tz); return dx + dz + (1.414 - 2) * Math.min(dx, dz); }
+    step(budgetMs) {
+      const j = this.job; if (!j) return true;
+      const g = this.grid, t0 = now(); let n = 0;
+      while (j.open.size) {
+        if ((++n & 15) === 0 && now() - t0 > budgetMs) return false;
+        if (n > this.cfg.maxExpansionsPerSlice) return false;
+        const k = j.open.pop(); if (j.closed.has(k)) continue; j.closed.add(k); j.exp++;
+        const x = KX(k), z = KZ(k), hh = this.h(x, z);
+        if (hh < j.bestH) { j.bestH = hh; j.best = k; }
+        if ((x === j.tx && z === j.tz) || j.exp > j.maxNodes) { this._finish(k); return true; }
+        const g0 = j.gs.get(k);
+        for (const [dx, dz, dl] of DIRS) {
+          const nx = x + dx, nz = z + dz, cst = g.cost(nx, nz); if (!cst) continue;
+          if (dx && dz && (!g.cost(x + dx, z) || !g.cost(x, z + dz))) continue;
+          let pen = 0; for (const [cx, cz] of j.copCells) { const d = Math.hypot(nx - cx, nz - cz); if (d < j.copR) pen += 6 * (1 - d / j.copR); }
+          const ng = g0 + dl * (cst + pen), nk = KEY(nx, nz), old = j.gs.get(nk);
+          if (old === undefined || ng < old) { j.gs.set(nk, ng); j.par.set(nk, k); j.open.push(ng + this.h(nx, nz), nk); }
+        }
+      }
+      this._finish(j.best); return true;
+    }
+    _finish(k) {
+      const j = this.job; this.job = null; this.stats.plans++;
+      if (k === null || k === undefined) { this.stats.fails++; this.path = null; return; }
+      const pts = []; while (k !== undefined) { pts.push(this.grid.toWorld(KX(k), KZ(k))); k = j.par.get(k); }
+      pts.reverse(); this.path = pts.map(([x, z]) => ({ x, z }));
+    }
+    lookahead(pos, ahead) {
+      const p = this.path; if (!p || p.length < 2) return null;
+      let bi = 0, bd = 1e9; for (let i = 0; i < p.length; i++) { const d = Math.hypot(p[i].x - pos.x, p[i].z - pos.z); if (d < bd) { bd = d; bi = i; } }
+      if (bd > 12) return null;
+      let left = ahead;
+      for (let i = bi; i < p.length - 1; i++) { const seg = Math.hypot(p[i + 1].x - p[i].x, p[i + 1].z - p[i].z); if (seg >= left) { const t = left / seg; return { x: p[i].x + (p[i + 1].x - p[i].x) * t, z: p[i].z + (p[i + 1].z - p[i].z) * t }; } left -= seg; }
+      return p[p.length - 1];
+    }
+  }
+
+  // ---- where cash was seen (per run: the layout changes every run)
+  class BagMemory {
+    constructor(cfg) { this.cfg = cfg; this.bags = []; }
+    clear() { this.bags.length = 0; }
+    observe(visible, t, car) {
+      const R = this.cfg.bagMergeRadius;
+      for (const v of visible) {
+        let m = null, md = R; for (const b of this.bags) { const d = Math.hypot(b.x - v.x, b.z - v.z); if (d < md) { md = d; m = b; } }
+        if (!m) { m = { x: v.x, z: v.z }; this.bags.push(m); } else { m.x += (v.x - m.x) * 0.3; m.z += (v.z - m.z) * 0.3; }
+        m.conf = 1; m.seenAt = t;
+      }
+      for (const b of this.bags) {
+        if (b.conf <= 0) continue;
+        if (Math.hypot(b.x - car.x, b.z - car.z) < this.cfg.bagViewRadius * 0.4 && !visible.some(v => Math.hypot(v.x - b.x, v.z - b.z) < R)) { b.conf *= 0.9; if (b.conf < 0.15) b.conf = 0; }
+      }
+    }
+    candidates() { return this.bags.filter(b => b.conf > 0.1); }
+  }
+
+  // ---- cop tracking + goal choice (bag, or an escape point the cops aren't heading for)
+  class Strategist {
+    constructor(cfg, grid) { this.cfg = cfg; this.grid = grid; this._cops = []; this.target = null; }
+    trackCops(t, cops) {
+      const prev = this._cops, out = [];
+      for (const c of cops) {
+        let m = null, md = 12; for (const p of prev) { const d = Math.hypot(p.x - c.x, p.z - c.z); if (d < md) { md = d; m = p; } }
+        let vx = c.vx || 0, vz = c.vz || 0;
+        if (c.vx === undefined && m && t > m.t) { const dt = (t - m.t) / 1000; vx = m.vx * 0.6 + ((c.x - m.x) / dt) * 0.4; vz = m.vz * 0.6 + ((c.z - m.z) / dt) * 0.4; }
+        out.push({ x: c.x, z: c.z, vx, vz, t });
+      }
+      this._cops = out; const k = this.cfg.copPredictS;
+      return out.map(c => ({ x: c.x + c.vx * k, z: c.z + c.vz * k, nowX: c.x, nowZ: c.z }));
+    }
+    chooseGoal(car, hx, hz, cops, bags, t) {
+      const cfg = this.cfg, g = this.grid;
+      const copDist = (x, z) => { let m = 1e9; for (const c of cops) m = Math.min(m, Math.hypot(x - c.x, z - c.z), Math.hypot(x - c.nowX, z - c.nowZ)); return m; };
+      if (cfg.priority === 'money') {
+        let best = null, bs = -1e9;
+        for (const b of bags) { const d = Math.hypot(b.x - car.x, b.z - car.z), dc = copDist(b.x, b.z); const s = (b.conf * 100) / (d + 25) - (dc < 30 ? (30 - dc) / 20 : 0); if (s > bs) { bs = s; best = b; } }
+        if (best && bs > 0.25) return { x: best.x, z: best.z, kind: 'bag', bag: best };
+      } else {
+        const nearestCop = copDist(car.x, car.z), keep = this.target && this.target.kind === 'bag' && this.target.bag;
+        let best = null, bs = -1e9;
+        for (const b of bags) {
+          if (b._skipUntil && t < b._skipUntil) continue;
+          const dx = b.x - car.x, dz = b.z - car.z, d = Math.hypot(dx, dz), ang = Math.acos(clamp((dx * hx + dz * hz) / (d + 1e-6), -1, 1)), dc = copDist(b.x, b.z), committed = keep === b;
+          const ok = d < cfg.bagDetourMax * (committed ? 1.3 : 1) && (ang < cfg.bagAngleMax * (committed ? 1.8 : 1) || d < 10) && dc > cfg.bagSafeCopDist && nearestCop > 14;
+          if (!ok) { if (committed) b._skipUntil = t + 8000; continue; }
+          const s = b.conf * (1 - d / 80) - ang * 0.3; if (s > bs) { bs = s; best = b; }
+        }
+        if (best) return { x: best.x, z: best.z, kind: 'bag', bag: best };
+      }
+      let eb = null, es = -1e9; const here = copDist(car.x, car.z);
+      for (const R of cfg.escRadii) for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a), x = car.x + dx * R, z = car.z + dz * R;
+        const [gx, gz] = g.toCell(x, z), c = g.cost(gx, gz); if (!c || c >= 12) continue;
+        let s = 4 * g.openness(gx, gz) - c * 0.4;
+        s += (Math.min(90, copDist(x, z)) - Math.min(90, here)) * cfg.escCopW;
+        for (const cp of cops) { const cx = cp.x - car.x, cz = cp.z - car.z, cd = Math.hypot(cx, cz) + 1e-6, toward = (cx * dx + cz * dz) / cd; if (toward > 0.5 && cd < R + 10) s -= 4 * toward * (1 - cd / (R + 30)); }
+        const align = dx * hx + dz * hz; s += cfg.escMomentum * align + (align < -0.3 ? -cfg.escMomentum * 1.2 : 0);
+        if (this.target && this.target.kind === 'escape' && Math.hypot(x - this.target.x, z - this.target.z) < 12) s += 1.2;
+        if (s > es) { es = s; eb = { x, z, kind: 'escape' }; }
+      }
+      return eb;
+    }
+  }
+
+  // ---- stuck / water recovery: back up toward the last dry spot, else drive to the nearest open road
+  // returns {turn: +1 = turn toward +angle, throttle: 1 gas / -1 reverse} or null
+  class Recovery {
+    constructor(cfg, grid) { this.cfg = cfg; this.grid = grid; this.reset(); }
+    reset() { this.R = { phase: null, tries: 0 }; this.trail = []; this.lastMoveT = null; this.started = false; }
+    tick(t, car, fwd, speed, inWater) {
+      const cfg = this.cfg, R = this.R;
+      if (speed > cfg.stuckSpeed * 2) this.lastMoveT = t;
+      if (!inWater && !R.phase && speed > cfg.stuckSpeed * 2) {
+        this.started = true; const h = this.trail;
+        if (!h.length || Math.hypot(h[h.length - 1].x - car.x, h[h.length - 1].z - car.z) > 3) { h.push({ x: car.x, z: car.z }); if (h.length > 12) h.shift(); }
+      }
+      const slow = this.started && (!this.lastMoveT || t - this.lastMoveT > cfg.stuckMs);
+      const angTo = (P, m) => { const dx = P.x - car.x, dz = P.z - car.z, d = Math.hypot(dx, dz) + 1e-6; return Math.atan2(m.x * dz / d - m.z * dx / d, m.x * dx / d + m.z * dz / d); };
+      const pick = () => { for (let i = this.trail.length - 1; i >= 0; i--) { const d = Math.hypot(this.trail[i].x - car.x, this.trail[i].z - car.z); if (d > 6 && d < 40) return this.trail[i]; } return this.grid.nearestLand(car.x, car.z, cfg.landSearchCells); };
+      if (!R.phase) {
+        if (!(inWater || slow)) { if (speed > cfg.stuckSpeed * 2) R.tries = 0; return null; }
+        R.target = pick(); R.tries++; R.since = t; R.startD = R.target ? Math.hypot(R.target.x - car.x, R.target.z - car.z) : 0;
+        const behind = R.target && Math.abs(angTo(R.target, fwd)) > Math.PI / 2;
+        R.phase = (behind || slow) ^ (R.tries % 3 === 0) ? 'reverse' : 'forward';
+      }
+      const T = R.target;
+      if ((!inWater && speed > cfg.stuckSpeed * 2 && t - R.since > 500) || (T && Math.hypot(T.x - car.x, T.z - car.z) < 4)) { R.phase = null; this.lastMoveT = t; return null; }
+      const limit = R.phase === 'reverse' ? (inWater ? cfg.escapeMs : cfg.reverseMs) : cfg.escapeMs;
+      const progress = T ? R.startD - Math.hypot(T.x - car.x, T.z - car.z) : 0;
+      if (t - R.since > limit || (t - R.since > 1500 && progress < 0.5)) { R.phase = R.phase === 'reverse' ? 'forward' : 'reverse'; R.since = t; R.tries++; R.target = pick(); R.startD = R.target ? Math.hypot(R.target.x - car.x, R.target.z - car.z) : 0; }
+      const mode = inWater ? 'water' : 'unstuck';
+      if (!R.target) return { turn: R.tries % 2 ? 1 : -1, throttle: R.phase === 'reverse' ? -1 : 1, mode };
+      if (R.phase === 'reverse') return { turn: -clamp(angTo(R.target, { x: -fwd.x, z: -fwd.z }) * cfg.steerGain, -1, 1), throttle: -1, mode };
+      return { turn: clamp(angTo(R.target, fwd) * cfg.steerGain, -1, 1), throttle: 1, mode };
+    }
+  }
+
+  root.ERBot4 = { DEFAULTS, prep, PolicyNet, Learner, Planner, BagMemory, Strategist, Recovery };
+})(window);
+
+/* ERBot combine: plugs the other chat's v4 parts (v4core.js) into this bot.
+ *   - steering habits: the v4 neural net (trained on your driving + every attempt) replaces the
+ *     old copy-the-nearest-example habit once it has trained; until then the old one is used
+ *   - where to go: v4's goal chooser + A* route on the live map (bag, or an escape point away from
+ *     where the cops are heading); this bot's own look-ahead planner still does the actual driving,
+ *     dodging and braking, now pulled along that route
+ *   - stuck / water: v4's recovery (back up toward the last dry road, or drive to open road)
+ * Needs core + brain + map + v4core. */
+(function(){
+const E = window.ERBot, V4 = window.ERBot4;
+if (!E || !E.G || !E.brain || !V4) { console.warn('ERBot combine: missing parts'); return; }
+const G = E.G, S = E.brain;
+const cfg = Object.assign({}, V4.DEFAULTS);
+E.v4cfg = cfg;
+E.cfg.goalPull = E.cfg.goalPull || 0.12;
+
+/* ---- the map the route planner works on: 2 m blocks read from the live 3D view (+ learned city pieces) */
+const CS = 2;
+const KEY = (x, z) => (x + 32768) * 65536 + (z + 32768);
+const grid = {
+  size: CS, cfg, water: {}, cache: new Map(),
+  toCell: (x, z) => [Math.floor(x/CS), Math.floor(z/CS)],
+  toWorld: (gx, gz) => [(gx + 0.5)*CS, (gz + 0.5)*CS],
+  newFrame(){ this.cache.clear(); },
+  raw(gx, gz){
+    const k = KEY(gx, gz); let c = this.cache.get(k); if (c !== undefined) return c;
+    let blocked = 0, unseen = 0, out = 0;
+    for (const ox of [0.5, 1.5]) for (const oz of [0.5, 1.5]) {
+      const i = E.gridAt(gx*CS + ox, gz*CS + oz);
+      if (i < 0) { out++; continue; }
+      if (G.dist[i] < 0.75) blocked++; else if (!G.seen[i] && !G.memObs[i]) unseen++;
+    }
+    if (out === 4) c = 6;                              // beyond what it can see: allowed, but not preferred
+    else if (blocked >= 2) c = 0;                      // wall / building
+    else c = 1 + Math.round(blocked*1.5 + unseen*0.75);
+    this.cache.set(k, c); return c;
+  },
+  isWater(gx, gz){ return (this.water[gx + ',' + gz] || 0) >= 1; },
+  cost(gx, gz){
+    const c = this.raw(gx, gz); if (!c) return 0;
+    if (this.water[gx + ',' + gz]) return 25;
+    if (!this.raw(gx + 1, gz) || !this.raw(gx - 1, gz) || !this.raw(gx, gz + 1) || !this.raw(gx, gz - 1)) return c + cfg.wallMargin;
+    return c;
+  },
+  openness(gx, gz, r = 2){ let ok = 0, n = 0; for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) { n++; const c = this.raw(gx + dx, gz + dz); if (c && c <= 4) ok++; } return ok/n; },
+  nearestLand(x, z, maxR){
+    const [cx, cz] = this.toCell(x, z);
+    for (let r = 1; r <= maxR; r++) { let best = null, bd = 1e9;
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) { if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; const c = this.cost(cx + dx, cz + dz); if (!c || c > 4 || this.isWater(cx + dx, cz + dz)) continue; const d = dx*dx + dz*dz; if (d < bd) { bd = d; best = [cx + dx, cz + dz]; } }
+      if (best) { const [wx, wz] = this.toWorld(best[0], best[1]); return { x: wx, z: wz }; } }
+    return null;
+  },
+};
+
+const learner = new V4.Learner(cfg, S);
+const planner = new V4.Planner(cfg, grid);
+const bagMem = new V4.BagMemory(cfg);
+const strat = new V4.Strategist(cfg, grid);
+const recov = new V4.Recovery(cfg, grid);
+E.v4 = { learner, planner, bagMem, strat, recov, grid };
+let lastPlan = -1e9;
+
+/* ---- wrap the driving planner */
+const basePlan = E.planSteer;
+E.planSteer = function(p, gy, steerState, pol, car){
+  const t = performance.now();
+  grid.newFrame();
+  // 1) habits: the neural net once it has trained enough, blended with the old habit
+  if (learner.trained && learner.epochs >= 5) {
+    const q = learner.policy(E.features(p));
+    pol = pol ? { '-1': 0.65*q[0] + 0.35*pol['-1'], '0': 0.65*q[1] + 0.35*pol['0'], '1': 0.65*q[2] + 0.35*pol['1'] } : { '-1': q[0], '0': q[1], '1': q[2] };
+  }
+  // 2) where to go
+  const car2 = { x: p.x, z: p.z };
+  const sp = p.speed || 0, hx = sp > 1 ? p.vx/sp : Math.cos(p.th), hz = sp > 1 ? p.vz/sp : Math.sin(p.th);
+  const cops = strat.trackCops(t, (E.others || []).filter(o => Math.hypot(o.vx, o.vz) > 3));
+  bagMem.observe((E.targets || []).filter(b => !b.guess), t, car2);
+  if (!planner.job && t - lastPlan > cfg.replanEveryMs) {
+    strat.target = strat.chooseGoal(car2, hx, hz, cops, bagMem.candidates(), t);
+    if (strat.target) planner.start(car2, strat.target, cops);
+    lastPlan = t;
+  }
+  planner.step(cfg.plannerShareMs);
+  const la = planner.lookahead(car2, 6 + Math.min(8, sp*0.4));
+  E.goal = la || (strat.target && strat.target.kind === 'escape' ? strat.target : null);
+  E.goalKind = strat.target ? strat.target.kind : null;
+  // 3) stuck or in water: v4 recovery takes the wheel
+  const fwd = { x: Math.cos(p.th), z: Math.sin(p.th) };
+  const onFoot = E.footState && E.footState.on;
+  const rec = onFoot || t - E.stats.runStart < 4000 ? null : recov.tick(t, car2, fwd, sp, !!E.inWater);
+  if (rec) {
+    // +turn = toward a bigger angle; in this game steering right (u=+1) makes the angle smaller
+    const u = rec.turn > 0.3 ? -1 : rec.turn < -0.3 ? 1 : 0;
+    E.recMode = rec.mode;
+    learner.trainTick(1);
+    return { u1: u, t1: 0.3, u2: 0, brake: rec.throttle < 0 ? 1 : 0, score: 0, alive: true, tDie: 0, pts: [], gain: 0, reversing: rec.throttle < 0, recovering: rec.mode };
+  }
+  E.recMode = null;
+  const plan = basePlan.call(this, p, gy, steerState, pol, car);
+  // 4) learning in the time left over (about 1.5 ms a frame)
+  learner.trainTick(1.5);
+  return plan;
+};
+E.v4owned = true;   // tells the brain to leave stuck handling to the recovery above
+
+/* ---- runs */
+const prevStart = E.onRunStart;
+E.onRunStart = () => { if (prevStart) prevStart(); bagMem.clear(); recov.reset(); strat.target = null; strat._cops = []; planner.job = null; planner.path = null; E.goal = null; lastPlan = -1e9; };
+const prevEnd = E.onRunEnd;
+E.onRunEnd = (dur) => { if (prevEnd) prevEnd(dur); learner.dirty = true; learner.save(); E.saveBrain(true); };
+// save the trained net now and then too
+setInterval(() => { if (learner.trained) learner.save(); }, 30000);
+
+const prevHud = E.hudExtra;
+E.hudExtra = () => (prevHud ? prevHud() : '') +
+  (E.recMode ? ` | ${E.recMode === 'water' ? 'getting out of water' : 'getting unstuck'}` : E.goalKind ? ` | heading for ${E.goalKind === 'bag' ? 'cash' : 'open road'}` : '') +
+  ` | brain ${learner.trained ? Math.min(100, Math.round(100*learner.epochs/30)) + '% trained' : 'warming up'}`;
 })();
 
 /* ERBot watchdog: ends a run that has gone nowhere (stuck in water, wedged in a corner,
