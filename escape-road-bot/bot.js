@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.7.0';
+window.ERBOT_VERSION = '1.7.1';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -552,6 +552,7 @@ hudCss.textContent = `
 #erb-hud span.on{background:rgba(20,140,60,.9)}
 #erb-hud span.off{background:rgba(160,30,30,.9)}
 #erb-hud span.hint{background:rgba(0,0,0,.45);color:#ffd84d}
+#erb-hud span.ver{background:rgba(0,0,0,.45);color:#9fb3c8;font-weight:500}
 #erb-help{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%);z-index:99999;width:min(96vw,1100px);max-height:80vh;overflow:auto;background:rgba(10,14,24,.93);color:#fff;border:2px solid #ffd84d;border-radius:12px;padding:10px 14px;pointer-events:none;font:clamp(12px,1.45vw,16px)/1.35 system-ui,Segoe UI,Arial,sans-serif;display:none}
 #erb-help h3{margin:0 0 6px;font-size:1.15em;color:#ffd84d}
 #erb-help div.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr));gap:5px 18px}
@@ -604,7 +605,7 @@ function updateHud(){
   const text = `ERBot ${B.enabled ? 'ON' : 'off'} | ${B.mode} | runs ${S.runs} | now ${fmt(cur)} | best ${fmt(S.best)}` + (B.hudExtra ? B.hudExtra() : '') + (B.err ? ' | err' : '');
   if (text === lastHud) return; lastHud = text;
   const parts = text.split(' | ');
-  hud.innerHTML = parts.map((t, i) => `<span${i === 0 ? ` class="${B.enabled ? 'on' : 'off'}"` : ''}>${esc(t)}</span>`).join('') + '<span class="hint">H = help</span>';
+  hud.innerHTML = parts.map((t, i) => `<span${i === 0 ? ` class="${B.enabled ? 'on' : 'off'}"` : ''}>${esc(t)}</span>`).join('') + '<span class="hint">H = help</span><span class="ver">' + esc((window.__erbAppVersion ? 'app ' + window.__erbAppVersion + ' · ' : '') + 'bot ' + (window.ERBOT_VERSION || '?')) + '</span>';
 }
 B.updateHud = updateHud;
 
