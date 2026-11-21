@@ -12,5 +12,5 @@
     "electron": "^45.4.1",
     "electron-builder": "^25.1.8"
   },
-  "botVersion": "1.9.0"
+  "botVersion": "1.9.1"
 }

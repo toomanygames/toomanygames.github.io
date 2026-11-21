@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.9.0';
+window.ERBOT_VERSION = '1.9.1';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -579,6 +579,7 @@ const HELP = [
   ['heading for cash / open road / new streets', 'Where its route goes: a cash stack, open road away from where the cops are heading, or (explore goal) streets it hasn\u2019t driven yet.'],
   ['brain % trained', 'How far its driving brain (a small neural net) has trained on your driving and its attempts.'],
   ['getting unstuck / out of water', 'Backing up to the last dry road it drove on, or driving to open road.'],
+  ['in the water / at the shore', 'It fell in the water: it heads for the closest land, then stops at the edge and waits until it is out before driving on.'],
   ['on foot', 'Out of the car, getting back in.'],
   ['backing up', 'Stuck, reversing out.'],
   ['car damaged / swaps', 'Car smoking or burning: switching cars.'],
@@ -2070,6 +2071,94 @@ E.hudExtra = () => (prevHud ? prevHud() : '') +
   (E.recMode ? ` | ${E.recMode === 'water' ? 'getting out of water' : 'getting unstuck'}` : E.goalKind ? ` | heading for ${E.goalKind === 'bag' ? 'cash' : E.goalKind === 'explore' ? 'new streets' : 'open road'}` : '') +
   ` | brain ${learner.trained ? Math.min(100, Math.round(100*learner.epochs/30)) + '% trained' : 'warming up'}` +
   (rl ? ` | RL brain${cfg.driver === 'rl' ? ' driving' : ''} (${rl.updates} sim updates, ${rl.games} real games)` : '');
+})();
+
+/* ERBot water: if the car (or the driver, swimming) ends up in the water, head for the closest
+ * land, drive up to it, then stop and wait until it's really out of the water before driving on.
+ *
+ * How water is recognised: while driving normally the bot learns the road's height. Water sits
+ * lower than the road, so when the ground under and around the car drops well below road height
+ * the car is in the water. Land = ground back at road height (buildings and walls are higher and
+ * are not counted as somewhere to climb out). Needs core + brain + combine. */
+(function(){
+const E = window.ERBot; if (!E || !E.G) return;
+const G = E.G, angWrap = E.angWrap;
+const W = E.water = { roadY: null, inWater: false, wetSince: 0, drySince: 0, target: null, phase: null, phaseT: 0, enterT: 0, trail: [], times: 0 };
+
+// share of the ground around the car (within r metres) that is water / road-level land
+function around(p, r){
+  const cs = G.cell, n = Math.ceil(r / cs); let wet = 0, dry = 0, tot = 0;
+  for (let j = -n; j <= n; j += 2) for (let i = -n; i <= n; i += 2) {
+    if (Math.hypot(i, j)*cs > r) continue;
+    const c = E.gridAt(p.x + i*cs, p.z + j*cs); if (c < 0 || !G.seen[c]) continue; tot++;
+    const h = G.h[c] - W.roadY; if (h < -0.3) wet++; else if (h < 0.3) dry++;
+  }
+  return { wet: tot ? wet/tot : 0, dry: tot ? dry/tot : 0, tot };
+}
+// the closest road-level ground that has more of it around (so it isn't a thin kerb)
+function nearestLand(p){
+  const N = G.N, R = G.R, cs = G.cell; let best = null, bd = 1e9;
+  for (let j = 0; j < N; j += 2) for (let i = 0; i < N; i += 2) {
+    const c = j*N + i; if (!G.seen[c]) continue;
+    const h = G.h[c] - W.roadY; if (h < -0.25 || h > 0.3) continue;
+    let ok = 0; for (const [di, dj] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) { const k = (j + dj)*N + (i + di); if (k >= 0 && k < N*N && G.seen[k] && Math.abs(G.h[k] - W.roadY) < 0.3) ok++; }
+    if (ok < 3) continue;
+    const x = G.cx + (i - R)*cs, z = G.cz + (j - R)*cs, d = Math.hypot(x - p.x, z - p.z);
+    if (d < bd) { bd = d; best = { x, z, d }; }
+  }
+  if (best) return best;
+  // nothing in view: go back to the last dry spot it drove over
+  let tb = null; for (const q of W.trail) { const d = Math.hypot(q.x - p.x, q.z - p.z); if (!tb || d < tb.d) tb = { x: q.x, z: q.z, d }; }
+  return tb;
+}
+
+const base = E.planSteer;
+E.planSteer = function(p, gy, steerState, pol, car){
+  const t = performance.now(), sp = p.speed || 0, onFoot = E.footState && E.footState.on;
+  // 1) learn the road height and remember dry places while driving normally
+  if (!W.inWater && sp > 4 && !onFoot && t - E.stats.runStart > 3000) {
+    W.roadY = W.roadY === null ? gy : W.roadY*0.97 + gy*0.03;
+    const last = W.trail[W.trail.length - 1];
+    if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 4) { W.trail.push({ x: p.x, z: p.z }); if (W.trail.length > 25) W.trail.shift(); }
+  }
+  if (W.roadY === null) return base.call(this, p, gy, steerState, pol, car);
+  // 2) in the water or not?
+  const a = around(p, 3.5), low = W.roadY - gy;
+  const wetNow = a.tot > 8 && low > 0.35 && a.wet > 0.45;
+  const dryNow = a.tot > 8 && low < 0.15 && a.wet < 0.2;
+  if (wetNow) { if (!W.wetSince) W.wetSince = t; } else W.wetSince = 0;
+  if (dryNow) { if (!W.drySince) W.drySince = t; } else W.drySince = 0;
+  if (!W.inWater && W.wetSince && t - W.wetSince > 300) { W.inWater = true; W.enterT = t; W.phase = 'swim'; W.phaseT = t; W.target = null; W.times++; }
+  if (W.inWater && W.drySince && t - W.drySince > 600) { W.inWater = false; W.phase = null; W.target = null; }   // really on land again
+  E.inWater = W.inWater;
+  if (!W.inWater) return base.call(this, p, gy, steerState, pol, car);
+
+  // 3) in the water: head for the closest land
+  if (!W.target || t - (W.targetT || 0) > 1500) { const L = nearestLand(p); if (L) { W.target = L; W.targetT = t; } }
+  const T = W.target;
+  const fwdSpeed = p.vx*Math.cos(p.th) + p.vz*Math.sin(p.th);
+  let u = 0, brake = 0;
+  if (T) {
+    const d = Math.hypot(T.x - p.x, T.z - p.z);
+    const diff = angWrap(Math.atan2(T.z - p.z, T.x - p.x) - p.th);
+    if (W.phase === 'swim' && d < 2.5) { W.phase = 'wait'; W.phaseT = t; }
+    if (W.phase === 'wait' && d > 5) { W.phase = 'swim'; W.phaseT = t; }   // drifted away: go again
+    if (W.phase === 'swim') {
+      u = diff > 0.15 ? -1 : diff < -0.15 ? 1 : 0;           // steering right makes the angle smaller
+    } else {
+      // at the shore: stop and wait until it's out of the water. If it hasn't climbed out after
+      // 2.5 s, give it one short push toward the land, then wait again.
+      const k = (t - W.phaseT) % 3500;
+      if (k > 2500) { u = diff > 0.15 ? -1 : diff < -0.15 ? 1 : 0; }
+      else if (!onFoot && fwdSpeed > 0.5) brake = 1;            // brake (but don't start reversing)
+    }
+  }
+  return { u1: u, t1: 0.2, u2: 0, brake, score: 0, alive: true, tDie: 0, pts: [], gain: 0, water: W.phase };
+};
+const prevStart = E.onRunStart;
+E.onRunStart = () => { if (prevStart) prevStart(); W.roadY = null; W.inWater = false; E.inWater = false; W.wetSince = W.drySince = 0; W.target = null; W.phase = null; W.trail = []; };
+const prevHud = E.hudExtra;
+E.hudExtra = () => (prevHud ? prevHud() : '') + (W.inWater ? (W.phase === 'wait' ? ' | at the shore: waiting to get out' : ' | in the water: heading for land') : '');
 })();
 
 /* ERBot watchdog: ends a run that has gone nowhere (stuck in water, wedged in a corner,
