@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.10.0';
+window.ERBOT_VERSION = '1.11.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -726,7 +726,7 @@ const LS_KEY = 'erbot_brain_v3';
 
 /* ---------------- persistent memory ---------------- */
 const DEFAULT_CFG = { carRadius: 1.3, copRadius: 2.7, clearW: 1.2, nearCarW: 0.35, crowdW: 0.15, horizon: 2.0, bagPull: 0.3, bagValue: 15, imitW: 2.5, brakeCost: 0.6 };
-const TUNE = { carRadius:[1.0,1.9,0.08], copRadius:[1.8,4,0.15], clearW:[0.3,3,0.15], nearCarW:[0.05,1.2,0.06], crowdW:[0,0.8,0.05], horizon:[1.4,2.8,0.1], bagPull:[0.05,0.8,0.05], imitW:[0,8,0.5], brakeCost:[0.1,2,0.1] };
+const TUNE = { carRadius:[1.2,1.9,0.08], copRadius:[2.4,4,0.15], clearW:[0.6,3,0.15], nearCarW:[0.05,1.2,0.06], crowdW:[0,0.8,0.05], horizon:[1.8,2.8,0.1], bagPull:[0.05,0.8,0.05], imitW:[0,2.5,0.2], brakeCost:[0.1,2,0.1] };
 let S = { version: 3, samples: [], best: { ...DEFAULT_CFG }, bestScore: null, trial: null, runs: [], humanSamples: 0, careerPoints: 0, bestPoints: 0, calib: {} };
 try { const raw = localStorage.getItem(LS_KEY); if (raw) { const o = JSON.parse(raw); if (o && o.version === 3) S = Object.assign(S, o); } } catch (e) {}
 for (const k in DEFAULT_CFG) if (S.best[k] === undefined) S.best[k] = DEFAULT_CFG[k];
@@ -749,6 +749,8 @@ function newTrial(){
 function applyCfg(c){ Object.assign(E.cfg, c); E.cfg.grabRadius = 1.8; }
 S.trial = S.trial || newTrial();
 for (const k in DEFAULT_CFG) if (S.trial[k] === undefined) S.trial[k] = S.best[k];
+// keep the safety settings in a sane range (older versions could tune them down until it crashed a lot)
+for (const o of [S.best, S.trial]) for (const k in TUNE) { const [lo, hi] = TUNE[k]; if (typeof o[k] === 'number') o[k] = Math.min(hi, Math.max(lo, o[k])); }
 applyCfg(S.trial);
 
 /* ---------------- brake key (S) ---------------- */
@@ -896,7 +898,10 @@ E.planSteer = function(p, groundY, steerState, pol, car){
     if (others.length) { let rep = 0; for (const o of others) { const d = Math.hypot(o.x - x, o.z - z); rep += 1/(1 + d*d*0.02); } score -= rep * C.crowdW; }
     if (tg.length && alive) { let bd = 1e9; for (let i = 0; i < tg.length; i++) if (!got.has(i)) bd = Math.min(bd, Math.hypot(tg[i].x - x, tg[i].z - z)); if (bd < 1e9) score -= C.bagPull * Math.min(bd, 60); }
     if (E.goal && alive) score -= (C.goalPull || 0) * Math.min(Math.hypot(E.goal.x - x, E.goal.z - z), 30);   // follow the route
-    if (pol) score += C.imitW * Math.log(pol[u1] * 3);
+    // learned habits only choose between moves that are safe; they never outvote the crash checks
+    if (pol && alive) score += Math.min(C.imitW, 2) * Math.log(pol[u1] * 3);
+    // what the crash predictor learned from earlier crashes in the real game
+    if (E.danger) score -= (E.cfg.dangerW || 14) * E.danger[(u1 + 1)*2 + (brake ? 1 : 0)];
     if (!best || score > best.score) best = { u1, t1, u2, brake, score, alive, tDie, pts, gain };
   }
   return best;
@@ -911,7 +916,7 @@ function rewardTick(p, t, dt){
   let r = 0;
   if (p.speed < 2) r -= 2*dt; else r += dt*(0.5 + 0.5*Math.min(p.speed, 20)/20);
   const bags = E.bagsTaken || 0; if (bags > R.prevBags) { r += RW.bag*(bags - R.prevBags); R.last = `+${RW.bag} cash bag!`; R.lastT = t; } R.prevBags = bags;
-  const hits = (E.dmg && E.dmg.hits) || 0; if (hits > R.prevHits) { r += RW.hit; R.last = `${RW.hit} crash`; R.lastT = t; } R.prevHits = hits;
+  const hits = E.hitCount || 0; if (hits > R.prevHits) { r += RW.hit; R.last = `${RW.hit} crash`; R.lastT = t; } R.prevHits = hits;
   R.run += r; R.acc += r;
   if (t - R.bucketT >= 100) { R.buckets.push({ t, r: R.acc }); R.acc = 0; R.bucketT = t; if (R.buckets.length > 3000) R.buckets.shift(); }
 }
@@ -968,7 +973,7 @@ E.think = function(f){
 
 /* ---------------- after every attempt: learn from the rewards ---------------- */
 E.onRunStart = () => { if (E.bagMem) E.bagMem.clear(); E.ptrack.bl = new Set(); E.ptrack.mesh = null; E.ptrack.lockCam = null; E.recent = []; E.runBags = E.bagsTaken || 0; stuckSince = 0; reverseUntil = 0; lastT = 0;
-  const R = E.reward; R.run = 0; R.buckets = []; R.acc = 0; R.prevBags = E.bagsTaken || 0; R.prevHits = (E.dmg && E.dmg.hits) || 0; R.last = ''; };
+  const R = E.reward; R.run = 0; R.buckets = []; R.acc = 0; R.prevBags = E.bagsTaken || 0; R.prevHits = E.hitCount || 0; R.last = ''; };
 E.onRunEnd = (dur) => {
   const R = E.reward;
   const endT = R.buckets.length ? R.buckets[R.buckets.length-1].t : performance.now();
@@ -1319,20 +1324,22 @@ E.beforeRun = async () => {
   try {
     let P = null; try { P = await readPrefs(); } catch (e) { P = null; }
     E.money = P ? P.money : null;
-    const canSpin = P && P.money !== null && P.money >= 500;
-    if (canSpin) {
-      const before = P.spins;
-      const got = await E.spinForCars(Math.min(3, Math.floor(P.money / 500)));
-      if (got > 0) gs.spunAt = Date.now();
-      try { const P2 = await readPrefs(); if (P2) { E.money = P2.money; if (P2.spins > before) gs.spunAt = Date.now(); } } catch (e) {}
+    // can't read the game's save: do nothing (never guess)
+    if (P && P.money !== null) {
+      if (gs.spins === undefined) gs.spins = P.spins;                 // first time: remember the spin count
+      // spin only with $500 or more, and not again on every menu if the last try didn't spin
+      const triedRecently = gs.triedAtRun !== undefined && E.stats.runs - gs.triedAtRun < 3 && gs.triedSpins === P.spins;
+      if (P.money >= 500 && !triedRecently) {
+        gs.triedAtRun = E.stats.runs; gs.triedSpins = P.spins;
+        await E.spinForCars(Math.min(3, Math.floor(P.money / 500)));
+        await E.sleep(1500);
+        try { const P2 = await readPrefs(); if (P2) { P = P2; E.money = P2.money; } } catch (e) {}
+      }
+      // the garage only after a real roll: the game's own spin counter went up
+      if (P.spins > gs.spins) { await E.pickBestCar(); gs.pickedAt = Date.now(); }
+      gs.spins = P.spins; gs.owned = P.owned.join(',');
+      saveGs();
     }
-    // a new car only ever comes from a spin: go to the garage after one, or if the cars you own changed
-    const ownedKey = P ? P.owned.join(',') : null;
-    const changed = ownedKey !== null && gs.owned !== undefined && ownedKey !== gs.owned;
-    const spunRecently = gs.spunAt && (!gs.pickedAt || gs.spunAt > gs.pickedAt);
-    if (spunRecently || changed) { await E.pickBestCar(); gs.pickedAt = Date.now(); }
-    if (ownedKey !== null) gs.owned = ownedKey;
-    saveGs();
   } catch (e) { E.err = 'garage:' + e; }
   E.garageBusy = false;
 };
@@ -2079,6 +2086,132 @@ E.hudExtra = () => (prevHud ? prevHud() : '') +
   (rl ? ` | RL brain${cfg.driver === 'rl' ? ' driving' : ''} (${rl.updates} sim updates, ${rl.games} real games)` : '');
 })();
 
+/* ERBot crash predictor: learns from its own crashes in the real game.
+ *
+ * Every 0.1 s the bot remembers what it saw (the 31 game numbers) and what it did (steer left /
+ * straight / right, brake or not). When it crashes (a hard hit, or the run ending in a crash or an
+ * arrest), the moves of the 1.2 s before are labelled "led to a crash"; everything else is
+ * "was fine". A small neural network learns P(crash soon | what it sees, what it does).
+ * While driving, every move the planner considers gets a penalty for its predicted crash chance,
+ * so moves that crashed before in similar situations are avoided.
+ * Saved in the brain (erbot_brain_v3.danger). Needs core + brain + rl.js (for the network). */
+(function(){
+const E = window.ERBot, RL = window.ERRL; if (!E || !E.brain || !RL) return;
+const S = E.brain;
+const N_IN = 31 + 6, MAX = 2600, MAXPOS = 1100;
+const DZ = S.danger || (S.danger = { data: [], net: null, mean: null, std: null, crashes: 0, acc: null, trainedOn: 0 });
+let net = null; try { if (DZ.net) net = RL.MLP.fromJSON(DZ.net); } catch (e) { net = null; }
+E.cfg.dangerW = E.cfg.dangerW || 14;
+E.hitTimes = [];
+
+function prep(f){
+  const x = new Float32Array(31); let k = 0;
+  for (let i = 0; i <= 12; i++) x[k++] = f[i];
+  x[k++] = Math.sin(f[13]); x[k++] = Math.cos(f[13]); x[k++] = f[14];
+  for (let i = 16; i <= 30; i++) x[k++] = f[i];
+  return x;
+}
+function input(f, a){
+  const b = prep(f), x = new Float32Array(N_IN);
+  for (let i = 0; i < 31; i++) x[i] = DZ.mean ? (b[i] - DZ.mean[i])/DZ.std[i] : b[i];
+  x[31 + a] = 1; return x;
+}
+const sig = z => 1/(1 + Math.exp(-z));
+E.dangerReady = () => !!(net && DZ.crashes >= 12 && DZ.acc !== null && DZ.acc > 0.55);
+
+/* ---- while driving: predicted crash chance for each of the 6 moves ---- */
+const basePlan = E.planSteer;
+E.planSteer = function(p, gy, ss, pol, car){
+  E.danger = null;
+  if (E.dangerReady() && !(E.footState && E.footState.on)) {
+    const f = E.features(p), d = new Float32Array(6);
+    // the better it has proven at predicting crashes, the more its warnings count
+    const trust = Math.min(1, (DZ.acc - 0.5)/0.25);
+    for (let a = 0; a < 6; a++) d[a] = trust*sig(net.forward(input(f, a))[0]);
+    // only the differences between moves matter for choosing; keep the absolute level for the HUD
+    E.danger = d; E.dangerNow = Math.min(...d);
+  }
+  return basePlan.call(this, p, gy, ss, pol, car);
+};
+
+/* ---- after each run: label what happened and learn ---- */
+function collect(rec, hits, endT, crashedAtEnd){
+  const pos = [], neg = [];
+  const crashTimes = hits.slice(); if (crashedAtEnd) crashTimes.push(endT);
+  for (const r of rec) {
+    if (!r.f || r.f.length !== 31 || r.human) continue;
+    const a = (Math.round(r.u) + 1)*2 + (r.b ? 1 : 0);
+    const soon = crashTimes.some(ct => ct > r.t && ct - r.t <= 1200);
+    (soon ? pos : neg).push({ f: r.f.map(v => +v.toFixed(3)), a, y: soon ? 1 : 0 });
+  }
+  // keep every crash moment, and a sample of the fine ones (most moments are fine)
+  const keepNeg = neg.filter(() => Math.random() < Math.min(1, (pos.length*3 + 20)/Math.max(1, neg.length)));
+  return { pos, neg: keepNeg, crashes: crashTimes.length };
+}
+function train(){
+  const D = DZ.data; if (D.length < 60) return;
+  // inputs are normalised with the data's own spread
+  const m = new Float64Array(31), v = new Float64Array(31), P = D.map(d => prep(d.f));
+  for (const x of P) for (let i = 0; i < 31; i++) m[i] += x[i];
+  for (let i = 0; i < 31; i++) m[i] /= P.length;
+  for (const x of P) for (let i = 0; i < 31; i++) v[i] += (x[i] - m[i])**2;
+  DZ.mean = Array.from(m); DZ.std = Array.from(v, s => Math.max(0.05, Math.sqrt(s/P.length)));
+  // hold out every 5th example to measure honestly how well it predicts
+  const tr = [], te = []; D.forEach((d, i) => (i % 5 === 4 ? te : tr).push({ x: input(d.f, d.a), y: d.y }));
+  const posN = tr.filter(d => d.y).length || 1, negN = (tr.length - posN) || 1, wPos = Math.min(5, negN/posN);
+  if (!net) net = new RL.MLP([N_IN, 32, 1], 5, 0.5);
+  for (let ep = 0; ep < 25; ep++) {
+    for (let i = tr.length - 1; i > 0; i--) { const j = (Math.random()*(i + 1))|0; [tr[i], tr[j]] = [tr[j], tr[i]]; }
+    for (let s0 = 0; s0 < tr.length; s0 += 64) {
+      const G = net.zeroGrads(); let n = 0;
+      for (let k = s0; k < Math.min(tr.length, s0 + 64); k++) { const c = {}, z = net.forward(tr[k].x, c)[0], w = tr[k].y ? wPos : 1; net.backward(c, new Float32Array([w*(sig(z) - tr[k].y)]), G); n++; }
+      net.adam(G, n, 2e-3, 2);
+    }
+  }
+  // balanced accuracy on the held-out examples (0.5 = guessing)
+  let tp = 0, fn = 0, tn = 0, fp = 0;
+  for (const d of te) { const p = sig(net.forward(d.x)[0]) > 0.5; if (d.y) p ? tp++ : fn++; else p ? fp++ : tn++; }
+  DZ.acc = (tp + fn && tn + fp) ? 0.5*(tp/(tp + fn) + tn/(tn + fp)) : null;
+  DZ.net = net.toJSON(); DZ.trainedOn = D.length;
+}
+function addData(c){
+  DZ.crashes += c.crashes;
+  let pos = DZ.data.filter(d => d.y).concat(c.pos), neg = DZ.data.filter(d => !d.y).concat(c.neg);
+  if (pos.length > MAXPOS) pos = pos.slice(-MAXPOS);
+  if (neg.length > MAX - pos.length) neg = neg.slice(-(MAX - pos.length));
+  DZ.data = pos.concat(neg);
+}
+// crashes learned in the other games (several games at once) count here too
+const prevMerge = E.mergeDelta;
+let mergedSince = 0;
+E.mergeDelta = d => {
+  if (d && d.danger && d.danger.pos) { addData(d.danger); if (++mergedSince >= 3 && E.mode !== 'play') { mergedSince = 0; setTimeout(() => { try { train(); E.saveBrain(true); } catch (e) {} }, 100); } }
+  if (prevMerge && d && (!d.danger || (d.samples && d.samples.length) || d.run)) prevMerge(d);
+};
+const prevEnd = E.onRunEnd;
+E.onRunEnd = (dur) => {
+  const rec = (E.recent || []).slice(), hits = E.hitTimes.slice(), endT = rec.length ? rec[rec.length - 1].t + 100 : 0;
+  const quit = E.watchdog && E.watchdog.quitting;   // ended because it was stuck: not a crash
+  if (prevEnd) prevEnd(dur);
+  E.hitTimes = [];
+  if (rec.length < 20) return;
+  setTimeout(() => {
+    try {
+      const c = collect(rec, hits, endT, !quit && dur > 3);
+      if (window.__erbHub) try { window.__erbHub.push(JSON.stringify({ from: window.__erbWorker || 0, samples: [], danger: c })); } catch (e) {}   // share with the other games
+      addData(c);
+      train();
+      E.saveBrain(true);
+    } catch (e) { E.err = 'danger: ' + e; }
+  }, 200);
+};
+const prevStart = E.onRunStart;
+E.onRunStart = () => { if (prevStart) prevStart(); E.hitTimes = []; };
+const prevHud = E.hudExtra;
+E.hudExtra = () => (prevHud ? prevHud() : '') +
+  ` | crash predictor ${E.dangerReady() ? `on (${DZ.crashes} crashes learned, ${Math.round(DZ.acc*100)}% right)` : `learning (${DZ.crashes} crashes so far)`}`;
+})();
+
 /* ERBot water: if the car (or the driver, swimming) ends up in the water, head for the closest
  * land, drive up to it, then stop and wait until it's really out of the water before driving on.
  *
@@ -2275,7 +2408,7 @@ E.hooks.swap = function(f){
   // ---- damage
   if (!onFoot) {
     const dt = (f.t - D.lastT)/1000;
-    if (dt > 0 && dt < 0.3 && D.lastSp - p.speed > 6 && D.lastSp > 9) { D.hits++; D.score += 1 + Math.min(2, (D.lastSp - p.speed)/10); }
+    if (dt > 0 && dt < 0.3 && D.lastSp - p.speed > 6 && D.lastSp > 9) { D.hits++; D.score += 1 + Math.min(2, (D.lastSp - p.speed)/10); E.hitCount = (E.hitCount || 0) + 1; (E.hitTimes || (E.hitTimes = [])).push(f.t); }
     D.lastSp = p.speed; D.lastT = f.t;
     if ((++fc) % 6 === 0) {
       const [fi, sm, bl] = looks(f, p);
