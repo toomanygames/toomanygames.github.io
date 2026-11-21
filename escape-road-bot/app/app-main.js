@@ -80,7 +80,7 @@ async function waitAndInject(g) {
         if (snap) await jsIn(g, `(() => { const d = ${snap}; for (const k in d) if (d[k] != null) localStorage.setItem(k, d[k]); })()`);
       }
       await injectBot(g); g.injected = true;
-      if (g.i === 0) { driveGoal = await js('window.ERBot && window.ERBot.v4cfg && window.ERBot.v4cfg.priority') || 'money'; buildMenu(); }
+      if (g.i === 0) { driveGoal = await js('window.ERBot && window.ERBot.v4cfg && window.ERBot.v4cfg.priority') || 'money'; driver = await js('window.ERBot && window.ERBot.v4cfg && window.ERBot.v4cfg.driver') || 'mix'; buildMenu(); }
       return;
     }
     await sleep(1000);
@@ -160,7 +160,7 @@ const statsCode = `(() => { const E = window.ERBot; if (!E || !E.brain) return n
     points: E.reward ? E.reward.run : 0, bestPoints: B.bestPoints || 0, level: lv.name || '', next: lv.next || null, totalRuns: runs.length,
     best: runs.reduce((a, r) => Math.max(a, r.dur || 0), 0), runs: runs.slice(-120).map(r => [r.dur || 0, r.points || 0, r.bags || 0, r.human ? 1 : 0]),
     samples: B.samples.length, human, bot, crash, sim, net: L ? { epochs: L.epochs, trained: !!L.trained, motion: !!L.motion } : null,
-    pieces: E.mapStats ? E.mapStats().known : 0, bagsTaken: E.bagsTaken || 0, gaveUp: E.watchdog ? E.watchdog.quits : 0 }; })()`;
+    pieces: E.mapStats ? E.mapStats().known : 0, rl: B.rl ? { updates: B.rl.updates || 0, games: B.rl.games || 0, steps: B.rl.steps || 0 } : null, driver: E.v4cfg && E.v4cfg.driver, bagsTaken: E.bagsTaken || 0, gaveUp: E.watchdog ? E.watchdog.quits : 0 }; })()`;
 ipcMain.handle('erb-get-stats', async () => {
   const bot = games[0] && games[0].injected ? await js(statsCode) : null;
   const list = [];
@@ -168,7 +168,13 @@ ipcMain.handle('erb-get-stats', async () => {
   return JSON.stringify({ bot, games: list });
 });
 // what the bots aim for: cash first, survive first, or explore the map
-let driveGoal = null;
+let driveGoal = null, driver = 'mix';
+async function setDriver(d) {
+  driver = d;
+  const code = `(() => { let c = {}; try { c = JSON.parse(localStorage.getItem('erbot_v4_config') || '{}') || {}; } catch (e) {} c.driver = ${JSON.stringify(d)}; localStorage.setItem('erbot_v4_config', JSON.stringify(c)); window.ERBot && window.ERBot.setDriver && window.ERBot.setDriver(${JSON.stringify(d)}); })()`;
+  for (const g of games) await jsIn(g, code);
+  buildMenu();
+}
 async function setDriveGoal(goal) {
   driveGoal = goal;
   const code = `(() => { let c = {}; try { c = JSON.parse(localStorage.getItem('erbot_v4_config') || '{}') || {}; } catch (e) {} c.priority = ${JSON.stringify(goal)}; localStorage.setItem('erbot_v4_config', JSON.stringify(c)); window.ERBot && window.ERBot.setPriority && window.ERBot.setPriority(${JSON.stringify(goal)}); })()`;
@@ -280,7 +286,10 @@ function buildMenu() {
       { label: 'Goal: survive first (grab cash on the way)', type: 'radio', checked: driveGoal === 'pro', click: () => setDriveGoal('pro') },
       { label: 'Goal: explore the map (drive to streets it hasn\'t seen)', type: 'radio', checked: driveGoal === 'explore', click: () => setDriveGoal('explore') },
       { type: 'separator' },
-      { label: 'Open the trainer (practice vs simulated cops, live stats)...', accelerator: 'CmdOrCtrl+T', click: openTrainer },
+      { label: 'Driver: planner + learned brains (safest)', type: 'radio', checked: driver !== 'rl', click: () => setDriver('mix') },
+      { label: 'Driver: RL brain only (train it in the trainer first)', type: 'radio', checked: driver === 'rl', click: () => setDriver('rl') },
+      { type: 'separator' },
+      { label: 'Open the trainer (RL training, practice, live stats)...', accelerator: 'CmdOrCtrl+T', click: openTrainer },
     ] },
     { label: 'Learning', submenu: [
       { label: 'Open the trainer...', click: openTrainer },
@@ -329,6 +338,19 @@ app.whenReady().then(() => {
       await jsIn(games[1], 'window.__erbHub.push(JSON.stringify({ from: 1, samples: [{ f: Array(31).fill(0.5), u: 1, w: 1 }], run: { dur: 12, bags: 1, points: 30 }, points: 30 }))');
       await sleep(1500);
       console.log('HUB', await js('JSON.stringify({ samples: ERBot.brain.samples.length, runs: ERBot.brain.runs.length, career: ERBot.brain.careerPoints })'));
+    }
+    if (process.env.ERB_SELFTEST_RL) {
+      openTrainer(); await sleep(5000);
+      const tw = trainerWin.webContents;
+      await tw.executeJavaScript('document.getElementById("rlMin").value = 1; document.getElementById("rlBtn").click(); 1');
+      for (let k = 0; k < 150; k++) { await sleep(1000); const m = await tw.executeJavaScript('document.getElementById("rlMsg").textContent'); if (/^Done|stopped/.test(m)) { console.log('RLMSG', m); break; } }
+      console.log('RLRES', await tw.executeJavaScript('document.getElementById("rlResults").innerText.replace(/\\n/g, " | ")'));
+      console.log('SEND', await tw.executeJavaScript('document.getElementById("dlBtn").click(); new Promise(r => setTimeout(() => r(document.getElementById("toast").textContent), 4000))'));
+      await sleep(10000);
+      await setDriver('rl');
+      console.log('BOTRL', await js('JSON.stringify({ rl: !!(ERBot.rl && ERBot.rl()), upd: ERBot.rl() && ERBot.rl().updates, driver: ERBot.v4cfg.driver, hud: document.getElementById("erb-hud").innerText.replace(/\\n/g, " | ") })'));
+      console.log('AWR', await js('(() => { const ag = ERBot.rl(); const D = Array.from({ length: 60 }, (_, i) => ({ f: Array(31).fill(0.4), pf: null, u: i % 3 - 1, b: 0, ret: i % 2 ? 5 : -5 })); const r = ag.awrUpdate(D); return JSON.stringify({ r, games: ag.games }); })()'));
+      console.log('LIVE', await tw.executeJavaScript('new Promise(r => setTimeout(() => r(document.getElementById("liveTiles").innerText.replace(/\\n/g, " | ")), 2500))'));
     }
     if (process.env.ERB_SELFTEST_PRACTICE) {
       await setDriveGoal('explore');

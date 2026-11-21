@@ -105,6 +105,7 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 .toast.show { display: block; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 #liveChart { width: 100%; height: 150px; display: block; }
+#rlChart { width: 100%; height: 160px; display: block; }
 #simView { width: 100%; aspect-ratio: 1; display: block; background: #0b0e13; border-radius: 8px; }
 .live-panel { margin-bottom: 18px; }
 </style>
@@ -139,6 +140,17 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
       <label class="check"><input type="checkbox" id="cDup" checked><span>Remove repeats and contradictions<small>Same moment recorded twice, or you steering two ways in the same spot.</small></span></label>
       <button id="cleanBtn" type="button">Clean</button>
       <p class="note" id="cleanMsg">Your save already had your crash moments removed once. Cleaning again only removes what is left.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-rl">
+      <div class="row"><h2 id="h-rl">Real learning (RL)</h2><span class="pill" id="rlPill">no RL brain yet</span></div>
+      <p class="note" style="margin:0">A reinforcement-learning brain trained with <b>PPO</b>, the method behind many game-playing AIs. It starts by copying your driving and the teacher, then plays thousands of chases against the simulated cops. It gets a reward for staying alive, moving fast and taking cash, and a penalty for hits and getting caught, and it changes itself to earn more. In the real game it keeps learning after every run (advantage-weighted regression).</p>
+      <div class="ctl"><label for="rlMin">Train for <span class="val" id="rlMinVal">5 min</span></label><input id="rlMin" type="range" min="1" max="30" step="1" value="5"><span class="hint">Roughly 6 hours of simulated driving per minute.</span></div>
+      <div class="head-actions"><button id="rlBtn" type="button">Train with RL</button><button id="rlWatchBtn" type="button" class="ghost">Watch the RL brain</button><button id="rlResetBtn" type="button" class="ghost">Start over</button></div>
+      <div class="bar" aria-hidden="true"><i id="rlBar"></i></div>
+      <canvas id="rlChart" aria-label="RL learning curve"></canvas>
+      <div class="results" id="rlResults"></div>
+      <p class="note" id="rlMsg">The chart shows average survival in the simulator after each check (yellow) and the best brain so far (green). The best one is kept.</p>
     </section>
 
     <section class="panel" aria-labelledby="h-practice">
@@ -218,6 +230,7 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 
 <script src="erbot-v4.js"></script>
 <script src="sim.js"></script>
+<script src="rl.js"></script>
 <script>
 (() => {
 'use strict';
@@ -255,6 +268,7 @@ function load(text, label) {
   $('trainPill').className = 'pill' + (S.trainedNet ? ' good' : ' warn');
   $('cleanMsg').textContent = brain.v4cleaned ? `Already cleaned: your last ${brain.v4cleaned.forgetSecs} s before each crash are gone. Cleaning again only removes what is left.` : 'Nothing cleaned yet in this save.';
   if (label) toast('Loaded ' + label);
+  setTimeout(renderRL, 0);
 }
 
 // ------------------------------------------------------------------ summary tiles
@@ -373,7 +387,7 @@ async function train() {
   $('trainMsg').textContent = `Done. On driving it never saw, it scores ${fmt(fin.bal * 100, 1)}% (guessing = 33.3%) and calls ${fmt(fin.turn * 100, 0)}% of your turn starts. Download the save to use it.`;
   renderScoreTable(); S.busy = false; setBusy(false);
 }
-function setBusy(b) { for (const id of ['trainBtn', 'cleanBtn', 'testBtn', 'watchBtn', 'dlBtn', 'practiceBtn', 'pWatchBtn']) $(id).disabled = b; }
+function setBusy(b) { for (const id of ['trainBtn', 'cleanBtn', 'testBtn', 'watchBtn', 'dlBtn', 'practiceBtn', 'pWatchBtn', 'rlWatchBtn', 'rlResetBtn']) $(id).disabled = b; }
 
 function drawChart() {
   const c = $('chart'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
@@ -652,21 +666,26 @@ async function practice() {
 }
 $('practiceBtn').onclick = practice;
 let practiceRAF = 0;
-function stopPracticeWatch() { cancelAnimationFrame(practiceRAF); practiceRAF = 0; $('pWatchBtn').textContent = 'Watch one'; }
+let watchBtn = null;
+function stopPracticeWatch() { cancelAnimationFrame(practiceRAF); practiceRAF = 0; $('pWatchBtn').textContent = 'Watch one'; $('rlWatchBtn').textContent = 'Watch the RL brain'; }
 function watchPractice() {
   if (practiceRAF) { stopPracticeWatch(); return; }
   const ep = ERSim.newChase((Math.random() * 1e9) | 0, { copSpeed: +$('pCop').value / 100, imitate: $('pMix').checked ? brainDriver() : null, mix: 0.3 });
   if (!ep) return;
-  const cv = $('simView'); cv.hidden = false;
+  let acc = 0;
+  startSimView(ep, dt => { acc += dt; while (acc >= 0.05 && !ep.done) { ERSim.step(ep, 0.05); acc -= 0.05; } }, 'teacher', $('pWatchBtn'));
+}
+function startSimView(ep, advance, who, btn) {
+  const cv = $('simView'); cv.hidden = false; watchBtn = btn;
   const N = ep.city.N, img = document.createElement('canvas'); img.width = N; img.height = N;
   const ic = img.getContext('2d'), id = ic.createImageData(N, N);
   for (let i = 0; i < N * N; i++) { const w = ep.city.wall[i], c = w === 2 ? [32, 70, 140] : w ? [120, 48, 60] : [44, 52, 66]; id.data.set([c[0], c[1], c[2], 255], i * 4); }
   ic.putImageData(id, 0, 0);
-  $('pWatchBtn').textContent = 'Stop';
-  let last = performance.now();
+  btn.textContent = 'Stop';
+  let last = performance.now(), acc = 0;
   const loop = now => {
     const dt = Math.min(0.1, (now - last) / 1000); last = now;
-    for (let k = 0; k < 3 && !ep.done; k++) ERSim.step(ep, dt / 3);
+    if (who === 'RL brain') { acc += dt; while (acc >= 0.1 && !ep.done) { advance(); acc -= 0.1; } } else advance(dt);
     const W = cv.clientWidth; cv.width = W * devicePixelRatio; cv.height = W * devicePixelRatio;
     const g = cv.getContext('2d'), view = 90, sc = cv.width / view, ox = ep.car.x - view / 2, oz = ep.car.z - view / 2;
     g.imageSmoothingEnabled = false; g.drawImage(img, ox, oz, view, view, 0, 0, cv.width, cv.height);
@@ -676,13 +695,101 @@ function watchPractice() {
     for (const c of ep.cops) dot(c.x, c.z, 1.3, '#ff5468');
     dot(ep.car.x, ep.car.z, 1.3, '#3ecf8e');
     g.fillStyle = '#fff'; g.font = `${14 * devicePixelRatio}px IBM Plex Mono, monospace`;
-    g.fillText(`${fmt(ep.t, 1)} s · ${ep.got} cash · ${ep.cops.length} cops${ep.done ? ' · ' + ep.done : ''}`, 8 * devicePixelRatio, 20 * devicePixelRatio);
-    if (ep.done) { practiceRAF = 0; $('pWatchBtn').textContent = 'Watch another'; return; }
+    g.fillText(`${who} · ${fmt(ep.t, 1)} s · ${ep.got} cash · ${ep.cops.length} cops${ep.done ? ' · ' + ep.done : ''}`, 8 * devicePixelRatio, 20 * devicePixelRatio);
+    if (ep.done) { practiceRAF = 0; btn.textContent = btn === $('rlWatchBtn') ? 'Watch again' : 'Watch another'; return; }
     practiceRAF = requestAnimationFrame(loop);
   };
   practiceRAF = requestAnimationFrame(loop);
 }
 $('pWatchBtn').onclick = watchPractice;
+
+
+// ------------------------------------------------------------------ reinforcement learning (PPO)
+const RL = window.ERRL;
+let rlStop = false;
+$('rlMin').oninput = e => { $('rlMinVal').textContent = e.target.value + ' min'; };
+const rlEnv = () => { const cs = +$('pCop').value / 100; return { reset: sd => ERSim.envReset(sd, { copSpeed: cs }), step: (ep, a) => ERSim.envStep(ep, a) }; };
+function rlEval(ag, n = 12) {   // the same 12 chases every time, best move each step
+  const env = rlEnv(); let surv = 0, cash = 0;
+  for (let i = 0; i < n; i++) { const ep = env.reset(424242 + i * 131); while (!ep.done) { const p = ag.probs(ag.obs(ep.obs, ep.prevF)); let a = 0; for (let j = 1; j < 6; j++) if (p[j] > p[a]) a = j; env.step(ep, a); } surv += ep.t; cash += ep.got; }
+  return { surv: surv / n, cash: cash / n };
+}
+function rlAgent() { try { return S.brain && S.brain.rl ? RL.Agent.fromJSON(S.brain.rl) : null; } catch (e) { return null; } }
+function renderRL() {
+  const ag = rlAgent();
+  if (!ag) { $('rlPill').textContent = 'no RL brain yet'; $('rlPill').className = 'pill warn'; $('rlResults').innerHTML = ''; drawRLChart([]); return; }
+  const ev = ag.hist.filter(h => h.kind === 'eval'), best = ev.reduce((m, h) => Math.max(m, h.surv), 0), first = ev[0];
+  $('rlPill').textContent = `RL brain · ${fmt(ag.updates)} updates`; $('rlPill').className = 'pill good';
+  $('rlResults').innerHTML = [
+    ['Best survival (sim)', fmt(best, 1) + ' s', first ? `started at ${fmt(first.surv, 1)} s` : ''],
+    ['Simulated driving', fmt(ag.steps * 0.1 / 3600, 1) + ' h', `${fmt(ag.steps)} decisions`],
+    ['Learned in real games', fmt(ag.games), 'runs it improved from'],
+  ].map(([k, v, x]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${x}</div></div>`).join('');
+  drawRLChart(ev);
+}
+function drawRLChart(ev) {
+  const cv = $('rlChart'), W = cv.clientWidth, H = cv.clientHeight; if (!W) return; cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+  const g = cv.getContext('2d'); g.scale(devicePixelRatio, devicePixelRatio); g.clearRect(0, 0, W, H);
+  if (ev.length < 1) { g.fillStyle = '#8a94a6'; g.font = '13px IBM Plex Sans, sans-serif'; g.fillText('Train to see the learning curve.', 8, 20); return; }
+  const max = Math.max(30, ...ev.map(h => h.surv)) * 1.1, X = i => 8 + (W - 16) * (ev.length === 1 ? 0.5 : i / (ev.length - 1)), Y = v => H - 14 - (H - 28) * v / max;
+  g.strokeStyle = '#f2b640'; g.lineWidth = 2; g.beginPath(); ev.forEach((h, i) => i ? g.lineTo(X(i), Y(h.surv)) : g.moveTo(X(i), Y(h.surv))); g.stroke();
+  g.strokeStyle = '#3ecf8e'; g.beginPath(); let b = 0; ev.forEach((h, i) => { b = Math.max(b, h.surv); i ? g.lineTo(X(i), Y(b)) : g.moveTo(X(i), Y(b)); }); g.stroke();
+  g.fillStyle = '#8a94a6'; g.font = '11px IBM Plex Mono, monospace'; g.fillText(fmt(max, 0) + ' s', 4, 11); g.fillText('0', 4, H - 4);
+}
+async function trainRL() {
+  if (rlStop === false && $('rlBtn').dataset.running === '1') { rlStop = true; return; }
+  if (S.busy || !S.brain) return;
+  S.busy = true; setBusy(true); stopPracticeWatch(); rlStop = false;
+  $('rlBtn').dataset.running = '1'; $('rlBtn').textContent = 'Stop'; $('rlBtn').disabled = false;
+  try {
+    let ag = rlAgent();
+    if (!ag) {
+      // 1) start from the lessons: yours, the teacher's, and the crash lessons
+      ag = new RL.Agent(Date.now() % 100000);
+      let lessons = S.brain.samples.filter(x => x.f && x.f.length === 31);
+      if (lessons.filter(x => x.sim).length < 2000) {
+        $('rlMsg').textContent = 'Getting the teacher\'s lessons to start from…';
+        for (let i = 0; i < 12; i++) { const ep = ERSim.runChase(777 + i * 37, { copSpeed: +$('pCop').value / 100 }); if (ep) lessons = lessons.concat(ep.lessons); $('rlBar').style.width = (100 * (i + 1) / 12 * 0.3) + '%'; await frame(); }
+      }
+      $('rlMsg').textContent = 'Copying your driving and the teacher…';
+      ag.cloneFrom(lessons, 6); await frame();
+      const e0 = rlEval(ag); ag.hist.push({ kind: 'eval', upd: 0, surv: e0.surv, cash: e0.cash });
+    }
+    // 2) PPO
+    let best = { surv: -1, json: null };
+    const evs = ag.hist.filter(h => h.kind === 'eval'); if (evs.length) best = { surv: Math.max(...evs.map(h => h.surv)), json: ag.toJSON() };
+    const t0 = performance.now(), budget = +$('rlMin').value * 60000, env = rlEnv();
+    let lastFin = [];
+    while (!rlStop && performance.now() - t0 < budget) {
+      const { B, finished } = RL.collect(ag, env, 8, 256, (Date.now() % 1e6) + ag.updates * 997);
+      await frame();
+      ag.ppoUpdate(B); lastFin = lastFin.concat(finished).slice(-40);
+      if (ag.updates % 10 === 0) {
+        const e = rlEval(ag); ag.hist.push({ kind: 'eval', upd: ag.updates, surv: e.surv, cash: e.cash });
+        if (e.surv > best.surv) best = { surv: e.surv, json: ag.toJSON() };
+        S.brain.rl = best.json; renderRL();
+      }
+      const avg = lastFin.length ? lastFin.reduce((a, f) => a + f.surv, 0) / lastFin.length : 0;
+      $('rlBar').style.width = (30 + 70 * Math.min(1, (performance.now() - t0) / budget)) + '%';
+      $('rlMsg').textContent = `Update ${fmt(ag.updates)} · recent chases survive ${fmt(avg, 1)} s on average · best check ${fmt(best.surv, 1)} s`;
+      await frame();
+    }
+    // keep the best brain (its curve includes every check)
+    const final = RL.Agent.fromJSON(best.json || ag.toJSON()); final.hist = ag.hist; final.steps = ag.steps; final.updates = ag.updates; final.games = ag.games;
+    S.brain.rl = final.toJSON(); renderRL();
+    $('rlMsg').textContent = `Done. The best RL brain survives ${fmt(best.surv, 1)} s in the simulator. ${window.erbHost ? 'Press "Send to my bot" to use it in the game.' : 'Download the save to use it.'}`;
+  } catch (err) { $('rlMsg').textContent = 'RL training stopped: ' + (err && err.message || err); }
+  $('rlBtn').dataset.running = '0'; $('rlBtn').textContent = 'Train with RL'; rlStop = false;
+  S.busy = false; setBusy(false);
+}
+$('rlBtn').onclick = trainRL;
+$('rlResetBtn').onclick = () => { if (!S.brain || !S.brain.rl) return; if ($('rlResetBtn').dataset.confirm !== '1') { $('rlResetBtn').dataset.confirm = '1'; $('rlResetBtn').textContent = 'Click again to delete the RL brain'; setTimeout(() => { $('rlResetBtn').dataset.confirm = '0'; $('rlResetBtn').textContent = 'Start over'; }, 4000); return; } delete S.brain.rl; $('rlResetBtn').dataset.confirm = '0'; $('rlResetBtn').textContent = 'Start over'; renderRL(); };
+$('rlWatchBtn').onclick = () => {
+  const ag = rlAgent(); if (!ag) { toast('Train the RL brain first.'); return; }
+  if (practiceRAF) { stopPracticeWatch(); return; }
+  const ep = ERSim.envReset((Math.random() * 1e9) | 0, { copSpeed: +$('pCop').value / 100 }); if (!ep) return;
+  startSimView(ep, () => { if (ep.done) return; const b = ag.best(ep.obs, ep.prevF); ERSim.envStep(ep, b.a); }, 'RL brain', $('rlWatchBtn'));
+};
 
 // ------------------------------------------------------------------ live stats from the app
 async function pollLive() {
@@ -705,6 +812,7 @@ async function pollLive() {
     ['City pieces', fmt(b.pieces), 'building pieces it knows by heart'],
     ['Cash this session', fmt(b.bagsTaken), `goal: ${goal}`],
     ['Stuck runs ended', fmt(b.gaveUp), 'ended because it was stuck'],
+    ['RL brain', b.rl ? fmt(b.rl.games) + ' runs' : 'not trained', b.rl ? `learned from real runs · ${fmt(b.rl.updates)} sim updates${b.driver === 'rl' ? ' · driving' : ''}` : 'train it below (Real learning)'],
   ];
   $('liveTiles').innerHTML = tiles.map(([k, v, x]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${x}</div></div>`).join('');
   drawLiveChart(runs);

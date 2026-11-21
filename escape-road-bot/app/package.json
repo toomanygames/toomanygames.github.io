@@ -1,7 +1,7 @@
 {
   "name": "escape-road-bot",
   "productName": "Escape Road Bot",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "A self-driving, self-learning player for Escape Road 3, in its own browser window.",
   "main": "main.js",
   "author": "Doug",
@@ -9,7 +9,8 @@
   "private": true,
   "devDependencies": {
     "@electron/packager": "^20.3.0",
-    "electron": "^45.4.1"
+    "electron": "^45.4.1",
+    "electron-builder": "^25.1.8"
   },
-  "botVersion": "1.8.0"
+  "botVersion": "1.9.0"
 }

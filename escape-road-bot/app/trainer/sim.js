@@ -163,14 +163,14 @@
     const { car, city } = ep;
     ep.t += dt;
     ep.acc = (ep.acc || 0) + dt;
-    if (ep.acc >= 0.1) {        // decide 10 times a second
+    if (!ep.external && ep.acc >= 0.1) {        // decide 10 times a second
       ep.acc = 0;
       const f = features(ep), plan = teacher(ep);
       // sometimes drive the way the bot's current brain would, so it also learns to fix its own mistakes
       let u = plan.u1;
       if (ep.imitate && ep.R() < ep.mix) { const p = ep.imitate(f); if (p) u = p.indexOf(Math.max(p[0], p[1], p[2])) - 1; }
       car.u = u; car.brake = plan.brake;
-      ep.recent.push({ t: ep.t, f, u: plan.u1, ux: u });
+      ep.recent.push({ t: ep.t, f, u: plan.u1, ux: u, b: plan.brake ? 1 : 0 });
     }
     car.s += ((car.u || 0) - car.s) * Math.min(1, CAR.steerResp * dt);
     let v = Math.hypot(car.vx, car.vz) || car.v;
@@ -196,8 +196,8 @@
     ep.done = why;
     const bad = why !== 'got away';
     for (const r of ep.recent) {
-      if (bad && ep.t - r.t < 1.2) ep.lessons.push({ f: r.f.map(v => +v.toFixed(3)), u: r.ux, w: -0.4, sim: 1 });
-      else ep.lessons.push({ f: r.f.map(v => +v.toFixed(3)), u: r.u, w: 0.5, sim: 1 });
+      if (bad && ep.t - r.t < 1.2) ep.lessons.push({ f: r.f.map(v => +v.toFixed(3)), u: r.ux, b: r.b, w: -0.4, sim: 1 });
+      else ep.lessons.push({ f: r.f.map(v => +v.toFixed(3)), u: r.u, b: r.b, w: 0.5, sim: 1 });
     }
   }
 
@@ -209,5 +209,29 @@
     return ep;
   }
 
-  root.ERSim = { newChase, step, runChase, features, makeCity, CAR, COP };
+  /* ---------------- as an environment for reinforcement learning ----------------
+   * 6 actions: steer left / straight / right, each with or without the brake. One step = 0.1 s.
+   * Reward: staying alive and moving (+0.1 a step at full speed), cash +5, a hard hit -3,
+   * getting caught / wrecked / driving into water -10. */
+  const ACTIONS = [[-1, 0], [-1, 1], [0, 0], [0, 1], [1, 0], [1, 1]];
+  function envReset(seed, opts = {}) {
+    const ep = newChase(seed, opts); if (!ep) return null;
+    ep.external = true; ep.maxT = opts.maxT || 90; ep.prevF = null;
+    ep.obs = features(ep);
+    return ep;
+  }
+  function envStep(ep, a) {
+    const [u, b] = ACTIONS[a], got0 = ep.got, hits0 = ep.car.hits;
+    ep.car.u = u; ep.car.brake = b;
+    for (let k = 0; k < 2 && !ep.done; k++) step(ep, 0.05);
+    const sp = Math.hypot(ep.car.vx, ep.car.vz);
+    let r = 0.1 * (0.3 + 0.7 * Math.min(sp, CAR.vmax) / CAR.vmax) + 5 * (ep.got - got0) - 3 * (ep.car.hits - hits0);
+    let nearest = 99; for (const c of ep.cops) nearest = Math.min(nearest, Math.hypot(c.x - ep.car.x, c.z - ep.car.z));
+    if (nearest < 6) r -= 0.03 * (6 - nearest);
+    if (ep.done && ep.done !== 'got away') r -= 10;
+    ep.prevF = ep.obs; ep.obs = features(ep);
+    return { r, done: !!ep.done, timeUp: ep.done === 'got away' };
+  }
+
+  root.ERSim = { newChase, step, runChase, features, makeCity, CAR, COP, ACTIONS, envReset, envStep };
 })(typeof window !== 'undefined' ? window : globalThis);
