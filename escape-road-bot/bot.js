@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.7.1';
+window.ERBOT_VERSION = '1.8.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------

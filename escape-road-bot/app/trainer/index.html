@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape Road Bot Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Night-chase control room: ink background, asphalt panels, headlight amber for money/actions,
+   siren red/blue for cops. Layout: summary strip on top, then a two-column console:
+   controls on the left, the live map + chart on the right. Single dark theme by choice. */
+:root {
+  --ink: #0e1117;
+  --asphalt: #161b24;
+  --asphalt-2: #1d2430;
+  --line: #2a3342;
+  --text: #e7eaf0;
+  --muted: #8a94a6;
+  --amber: #f2b640;
+  --siren-red: #ff5468;
+  --siren-blue: #4f9cff;
+  --good: #3ecf8e;
+  --warn: #f2b640;
+  --bad: #ff5468;
+  --display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--text); font: 15px/1.5 var(--body); }
+body { padding: 20px clamp(16px, 3vw, 32px) 40px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; letter-spacing: .02em; text-wrap: balance; margin: 0; }
+h1 { font-size: 34px; line-height: 1.1; }
+h2 { font-size: 20px; text-transform: uppercase; letter-spacing: .06em; color: var(--text); }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; margin-bottom: 18px; }
+header .sub { color: var(--muted); max-width: 62ch; }
+.head-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+button, .filebtn {
+  font: 600 14px var(--body); color: var(--ink); background: var(--amber); border: 0; border-radius: 8px;
+  padding: 9px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+}
+button.ghost, .filebtn { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button.ghost:hover, .filebtn:hover { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, .filebtn:focus-within, input:focus-visible, select:focus-visible { outline: 2px solid var(--siren-blue); outline-offset: 2px; }
+.filebtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.tile { background: var(--asphalt); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.tile .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.tile .v { font: 600 24px var(--mono); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .s { font-size: 12px; color: var(--muted); }
+
+.console { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .console { grid-template-columns: 1fr; } }
+.panel { background: var(--asphalt); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+.col { display: grid; gap: 16px; }
+.step { font: 600 12px var(--mono); color: var(--amber); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ctl { display: grid; gap: 4px; }
+.ctl label { font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+.ctl label span.val { font-family: var(--mono); color: var(--amber); }
+.ctl .hint { font-size: 12px; color: var(--muted); }
+input[type=range] { width: 100%; accent-color: var(--amber); }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.check input { margin-top: 3px; accent-color: var(--amber); }
+.check small { display: block; color: var(--muted); font-size: 12px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 3px; }
+.seg button { background: transparent; color: var(--muted); padding: 7px; justify-content: center; }
+.seg button[aria-pressed=true] { background: var(--asphalt-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.note { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 10px; }
+.pill { font: 600 12px var(--mono); padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.pill.live { color: var(--siren-blue); border-color: color-mix(in srgb, var(--siren-blue) 45%, transparent); }
+.bar { height: 6px; background: var(--ink); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--amber); transition: width .2s; }
+
+.mapwrap { position: relative; background: #0a0d12; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+#map { display: block; width: 100%; height: 520px; cursor: grab; touch-action: none; }
+#map.dragging { cursor: grabbing; }
+.hud { position: absolute; left: 12px; top: 12px; display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none; }
+.hud .pill { background: rgba(14,17,23,.85); }
+.legend { position: absolute; right: 12px; bottom: 12px; background: rgba(14,17,23,.88); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; font-size: 12px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.maptools { position: absolute; right: 12px; top: 12px; display: flex; gap: 6px; }
+.maptools button { padding: 6px 10px; background: rgba(14,17,23,.88); color: var(--text); border: 1px solid var(--line); }
+
+#chart { width: 100%; height: 200px; display: block; }
+.results { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.results .tile .v { font-size: 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--asphalt-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; font-size: 14px; display: none; max-width: min(90vw, 560px); }
+.toast.show { display: block; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+#liveChart { width: 100%; height: 150px; display: block; }
+#simView { width: 100%; aspect-ratio: 1; display: block; background: #0b0e13; border-radius: 8px; }
+.live-panel { margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Escape Road Bot Trainer</h1>
+    <p class="sub">Clean your bot's driving data, train its brain, set how it plays, test it in a simulated chase on your real map, then download the save for the bot.</p>
+  </div>
+  <div class="head-actions">
+    <label class="filebtn" for="fileIn">Load another save<input id="fileIn" type="file" accept=".json,.txt,application/json"></label>
+    <button id="dlBtn" type="button">Download trained save</button>
+  </div>
+</header>
+
+<section class="tiles" id="tiles" aria-label="Your data"></section>
+<section class="panel live-panel" id="livePanel" aria-labelledby="h-live" hidden>
+  <div class="row"><h2 id="h-live">Your bot right now</h2><span class="pill live" id="liveState">connecting…</span></div>
+  <div class="tiles" id="liveTiles"></div>
+  <canvas id="liveChart" aria-label="Survival time of recent runs"></canvas>
+  <p class="note" id="liveNote">Survival time of the last runs (bars: green = bot, blue = you; line = bot's 10-run average). Updates every 2 seconds.</p>
+</section>
+
+<div class="console">
+  <div class="col">
+    <section class="panel" aria-labelledby="h-clean">
+      <div class="row"><h2 id="h-clean">Clean the data</h2><span class="step">1</span></div>
+      <label class="check"><input type="checkbox" id="cForget" checked><span>Forget my crashes<small>Drop the last <b id="forgetSecsLbl">2.5</b> s of your driving before each crash, so the bot doesn't copy the mistake.</small></span></label>
+      <div class="ctl"><label for="forgetSecs">Seconds to forget <span class="val" id="forgetSecsVal">2.5 s</span></label><input id="forgetSecs" type="range" min="1" max="5" step="0.5" value="2.5"></div>
+      <label class="check"><input type="checkbox" id="cWeak" checked><span>Drop the bot's weak runs<small>Its own short, moneyless runs teach bad habits.</small></span></label>
+      <label class="check"><input type="checkbox" id="cDup" checked><span>Remove repeats and contradictions<small>Same moment recorded twice, or you steering two ways in the same spot.</small></span></label>
+      <button id="cleanBtn" type="button">Clean</button>
+      <p class="note" id="cleanMsg">Your save already had your crash moments removed once. Cleaning again only removes what is left.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-practice">
+      <div class="row"><h2 id="h-practice">Practice vs simulated cops</h2><span class="step">★</span></div>
+      <p class="note" style="margin:0">Random cities like the game builds, and cops that drive the way the game's own police code does: they steer straight at you, swerve around what their front sensors see, back up when stuck, and more of them join over time. A teacher that knows exactly how they move drives each chase, and every move becomes a lesson for your bot (the moments before a crash become "don't do this" lessons).</p>
+      <div class="ctl"><label for="pCount">Chases <span class="val" id="pCountVal">40</span></label><input id="pCount" type="range" min="10" max="200" step="10" value="40"><span class="hint">About 1 second each.</span></div>
+      <div class="ctl"><label for="pCop">Cop speed <span class="val" id="pCopVal">90%</span></label><input id="pCop" type="range" min="70" max="110" step="5" value="90"><span class="hint">Compared with your car's top speed.</span></div>
+      <label class="check"><input type="checkbox" id="pMix" checked><span>Let its own brain drive sometimes<small>30% of moves come from the bot's trained brain and the teacher corrects them, so it learns to get out of its own mistakes. Needs a trained brain.</small></span></label>
+      <div class="head-actions"><button id="practiceBtn" type="button">Practice</button><button id="pWatchBtn" type="button" class="ghost">Watch one</button></div>
+      <div class="bar" aria-hidden="true"><i id="practiceBar"></i></div>
+      <canvas id="simView" aria-label="Practice chase" hidden></canvas>
+      <div class="results" id="practiceResults"></div>
+      <p class="note" id="practiceMsg">Practice lessons are added to the data. Then press Train, then send it to the bot. At most 6,000 practice lessons are kept (the newest).</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-train">
+      <div class="row"><h2 id="h-train">Train the brain</h2><span class="step">2</span></div>
+      <label class="check"><input type="checkbox" id="tMotion" checked><span>Use motion<small>Also learn from how things changed in the last 0.1 s. Tested: better.</small></span></label>
+      <label class="check"><input type="checkbox" id="tBalance" checked><span>Count turns more<small>You drive straight half the time; without this the brain learns "just go straight".</small></span></label>
+      <div class="ctl"><label for="tEpochs">Training passes <span class="val" id="tEpochsVal">30</span></label><input id="tEpochs" type="range" min="10" max="80" step="5" value="30"></div>
+      <div class="ctl"><label for="tL2">Keep it simple <span class="val" id="tL2Val">0.03</span></label><input id="tL2" type="range" min="0" max="5" step="1" value="3"><span class="hint">Higher = less memorizing of exact drives. 0.03 tested best.</span></div>
+      <button id="trainBtn" type="button">Train</button>
+      <div class="bar" aria-hidden="true"><i id="trainBar"></i></div>
+      <p class="note" id="trainMsg">Scores are measured on parts of your driving the brain never saw. Left, straight and right count equally, so guessing scores 33%.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-style">
+      <div class="row"><h2 id="h-style">Play style</h2><span class="step">3</span></div>
+      <div class="seg" role="group" aria-label="Priority">
+        <button type="button" id="pPro" aria-pressed="true">Pro: survive first</button>
+        <button type="button" id="pMoney" aria-pressed="false">Money hunter</button>
+        <button type="button" id="pExplore" aria-pressed="false">Explorer</button>
+      </div>
+      <div class="ctl"><label for="sDetour">Grab money within <span class="val" id="sDetourVal">55 m</span></label><input id="sDetour" type="range" min="20" max="120" step="5" value="55"><span class="hint">Pro mode only takes bags this close and roughly ahead.</span></div>
+      <div class="ctl"><label for="sHorizon">Look ahead <span class="val" id="sHorizonVal">1.4 s</span></label><input id="sHorizon" type="range" min="0.6" max="2.4" step="0.2" value="1.4"><span class="hint">How far ahead it checks for walls and cops before each move.</span></div>
+      <div class="ctl"><label for="sWall">Stay off walls <span class="val" id="sWallVal">3</span></label><input id="sWall" type="range" min="0" max="8" step="1" value="3"></div>
+      <div class="ctl"><label for="sCop">Predict cops <span class="val" id="sCopVal">1.0 s</span></label><input id="sCop" type="range" min="0" max="2.5" step="0.25" value="1"></div>
+      <button id="resetStyle" type="button" class="ghost">Reset to tested settings</button>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" aria-labelledby="h-map">
+      <div class="row"><h2 id="h-map">Map and test drive</h2><span class="step">4</span></div>
+      <div class="mapwrap">
+        <canvas id="map" aria-label="Explored map with remembered money bags"></canvas>
+        <div class="hud" id="hud"></div>
+        <div class="maptools"><button type="button" id="zoomIn" aria-label="Zoom in">+</button><button type="button" id="zoomOut" aria-label="Zoom out">−</button><button type="button" id="fitBtn">Fit</button></div>
+        <div class="legend" aria-hidden="true">
+          <span><i style="background:#3a4556"></i>explored road</span>
+          <span><i style="background:#8f3340"></i>wall / building</span>
+          <span><i style="background:#2f6fd6"></i>water</span>
+          <span><i style="background:var(--amber);border-radius:50%"></i>money bag</span>
+          <span><i style="background:var(--good);border-radius:50%"></i>bot</span>
+          <span><i style="background:var(--siren-red);border-radius:50%"></i>cop</span>
+        </div>
+      </div>
+      <div class="row" style="flex-wrap:wrap">
+        <div class="head-actions">
+          <button id="watchBtn" type="button">Watch a chase</button>
+          <button id="testBtn" type="button" class="ghost">Run 30-chase test</button>
+        </div>
+        <span class="muted" style="font-size:13px">Simulated: 3 cops at 90% of your speed, walls from your map.</span>
+      </div>
+      <div class="results" id="simResults"></div>
+      <p class="note">The simulation is rougher than the real game: simple car physics and cops that chase in a straight line. Use it to compare settings, not to predict real scores.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-chart">
+      <div class="row"><h2 id="h-chart">Training score</h2><span class="pill" id="trainPill">not trained in this page yet</span></div>
+      <canvas id="chart" aria-label="Held-out score per training pass"></canvas>
+      <table id="scoreTable"><tbody></tbody></table>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="erbot-v4.js"></script>
+<script src="sim.js"></script>
+<script>
+(() => {
+'use strict';
+const E = window.ERBot4;
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 0) => Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+const toast = (msg, ms = 3500) => { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+// ------------------------------------------------------------------ state
+const S = { save: null, brain: null, map: null, worldKey: '0,0', trainedNet: null, scores: [], busy: false, sim: null, cleanedOnce: false };
+const TESTED = { priority: 'pro', bagDetourMax: 55, safetyHorizon: 1.4, wallMargin: 3, copPredictS: 1.0 };
+const style = Object.assign({}, TESTED);
+
+function parseSave(text) {
+  const o = JSON.parse(text);
+  if (!o || !o.data || !o.data.erbot_brain_v3) throw new Error('This file is not an Escape Road bot save (no erbot_brain_v3 inside).');
+  const brain = typeof o.data.erbot_brain_v3 === 'string' ? JSON.parse(o.data.erbot_brain_v3) : o.data.erbot_brain_v3;
+  const map = o.data.erbot_map_v1 ? (typeof o.data.erbot_map_v1 === 'string' ? JSON.parse(o.data.erbot_map_v1) : o.data.erbot_map_v1) : { version: 1, worlds: {} };
+  let cfg = {};
+  try { cfg = o.data.erbot_v4_config ? (typeof o.data.erbot_v4_config === 'string' ? JSON.parse(o.data.erbot_v4_config) : o.data.erbot_v4_config) : {}; } catch (e) { cfg = {}; }
+  return { save: o, brain, map, cfg };
+}
+function load(text, label) {
+  const { save, brain, map, cfg } = parseSave(text);
+  S.save = save; S.brain = brain; S.map = map; S.scores = []; S.cleanedOnce = !!brain.v4cleaned;
+  S.trainedNet = brain.v4net || null;
+  const keys = Object.keys(map.worlds || {});
+  S.worldKey = keys.sort((a, b) => Object.keys(map.worlds[b].chunks || {}).length - Object.keys(map.worlds[a].chunks || {}).length)[0] || '0,0';
+  for (const k of Object.keys(TESTED)) if (cfg[k] !== undefined) style[k] = cfg[k];
+  syncStyleUI();
+  buildMapImage(); fitMap(); renderTiles(); drawChart(); renderScoreTable();
+  $('trainPill').textContent = S.trainedNet ? 'brain trained earlier' : 'not trained yet';
+  $('trainPill').className = 'pill' + (S.trainedNet ? ' good' : ' warn');
+  $('cleanMsg').textContent = brain.v4cleaned ? `Already cleaned: your last ${brain.v4cleaned.forgetSecs} s before each crash are gone. Cleaning again only removes what is left.` : 'Nothing cleaned yet in this save.';
+  if (label) toast('Loaded ' + label);
+}
+
+// ------------------------------------------------------------------ summary tiles
+function counts() {
+  const s = S.brain.samples || [];
+  let human = 0, bot = 0, crash = 0;
+  let sim = 0;
+  for (const x of s) { if (x.sim) sim++; else if (x.w === 1) human++; else if (x.w < 0) crash++; else bot++; }
+  const runs = S.brain.runs || [];
+  const hr = runs.filter(r => r.human), br = runs.filter(r => !r.human);
+  const w = S.map.worlds[S.worldKey] || { chunks: {}, bags: [] };
+  const chunks = Object.keys(w.chunks || {}).length;
+  return { human, bot, crash, sim, hr, br, chunks, bags: (w.bags || []).length, exact: (w.bags || []).filter(b => b.exact).length, water: Object.keys(w.water || {}).length, worlds: Object.keys(S.map.worlds || {}).length };
+}
+function renderTiles() {
+  const c = counts();
+  const avg = a => a.length ? a.reduce((t, r) => t + r.dur, 0) / a.length : 0;
+  const tiles = [
+    ['Your driving', fmt(c.human), `moments recorded · ${c.hr.length} runs`],
+    ['Bot runs', fmt(c.br.length), `avg ${fmt(avg(c.br), 1)} s · you avg ${fmt(avg(c.hr), 1)} s`],
+    ['Crash lessons', fmt(c.crash), 'moments before the bot crashed'],
+    ['Bot\'s own driving', fmt(c.bot), 'kept from good bot runs'],
+    ['Practice lessons', fmt(c.sim), 'from simulated chases'],
+    ['Map explored', fmt(c.chunks * 51.2 * 51.2 / 1e6, 2) + ' km²', `${fmt(c.chunks)} squares · ${c.worlds} map${c.worlds === 1 ? '' : 's'}`],
+    ['Money bags', fmt(c.bags), `${fmt(c.exact)} exact spots · ${fmt(c.water)} water spots`],
+  ];
+  $('tiles').innerHTML = tiles.map(([k, v, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+}
+
+// ------------------------------------------------------------------ cleaning
+function clean() {
+  const forget = $('cForget').checked, weak = $('cWeak').checked, dup = $('cDup').checked;
+  const secs = +$('forgetSecs').value;
+  const s = S.brain.samples;
+  const drop = new Set();
+  let nForget = 0, nWeak = 0, nDup = 0;
+  const prior = (S.brain.v4cleaned && S.brain.v4cleaned.forgetSecs) || 0;
+  if (forget && secs > prior) {
+    const K = Math.round((secs - prior) * 7.5);  // ~7.5 recorded moments per second; only the extra seconds
+    let i = 0;
+    while (i < s.length) {
+      if (s[i].w === 1) {
+        let j = i; while (j < s.length && s[j].w === 1) j++;
+        if (j - i > K * 2) for (let k = j - K; k < j; k++) if (!drop.has(k)) { drop.add(k); nForget++; }
+        i = j;
+      } else i++;
+    }
+  }
+  if (weak) s.forEach((x, i) => { if (!x.sim && x.w > 0 && x.w < 1 && !drop.has(i)) { drop.add(i); nWeak++; } });
+  if (dup) {
+    const seen = new Map();
+    s.forEach((x, i) => {
+      if (x.w !== 1 || drop.has(i)) return;
+      const key = x.f.join(',');
+      const prev = seen.get(key);
+      if (prev === undefined) { seen.set(key, i); return; }
+      drop.add(i); nDup++;
+      if (s[prev].u !== x.u && !drop.has(prev)) { drop.add(prev); nDup++; }
+    });
+  }
+  if (!drop.size) { $('cleanMsg').textContent = forget && secs <= prior ? `Already clean: your last ${prior} s before each crash were removed before. Raise the seconds to remove more.` : 'Nothing left to remove.'; return; }
+  S.brain.samples = s.filter((x, i) => !drop.has(i));
+  S.brain.humanSamples = S.brain.samples.filter(x => x.w === 1).length;
+  S.brain.v4cleaned = { at: Date.now(), forgetSecs: Math.max(prior, forget ? secs : 0) };
+  S.trainedNet = null; delete S.brain.v4net; delete S.brain.v4epochs;
+  $('trainPill').textContent = 'data changed: train again'; $('trainPill').className = 'pill warn';
+  renderTiles();
+  const total = nForget + nWeak + nDup;
+  $('cleanMsg').textContent = total ? `Removed ${fmt(total)}: ${fmt(nForget)} crash moments, ${fmt(nWeak)} weak bot moments, ${fmt(nDup)} repeats. Train again to use the cleaner data.` : 'Nothing left to remove.';
+}
+
+// ------------------------------------------------------------------ training
+const L2S = [0, 0.003, 0.01, 0.03, 0.06, 0.1];
+function trainCfg() { return { motion: $('tMotion').checked, balance: $('tBalance').checked ? 3 : 0, l2: L2S[+$('tL2').value], epochs: +$('tEpochs').value }; }
+function evalLearner(L, test, samples) {
+  let acc = 0, recall = [0, 0, 0], cnt = [0, 0, 0], ts = 0, tsn = 0;
+  for (const i of test) {
+    const s = samples[i]; if (s.w !== 1) continue;
+    const p = L.net.forward(L.data[i].x); const k = p.indexOf(Math.max(p[0], p[1], p[2])) - 1;
+    cnt[s.u + 1]++; if (k === s.u) { acc++; recall[s.u + 1]++; }
+    if (s.u !== 0 && Math.round(s.f[15]) !== s.u) { tsn++; if (k === s.u) ts++; }
+  }
+  const n = cnt[0] + cnt[1] + cnt[2];
+  const bal = [0, 1, 2].filter(c => cnt[c]).reduce((t, c) => t + recall[c] / cnt[c], 0) / [0, 1, 2].filter(c => cnt[c]).length;
+  return { acc: acc / n, bal, turn: tsn ? ts / tsn : 0 };
+}
+async function train() {
+  if (S.busy) return; S.busy = true; setBusy(true);
+  const cfg = trainCfg();
+  const samples = S.brain.samples.map(x => ({ f: x.f, u: x.u, w: x.w }));
+  if (samples.filter(x => x.w === 1).length < 200) { toast('Not enough of your driving to train on (need 200+ moments).'); S.busy = false; setBusy(false); return; }
+  const C = Object.assign({}, E.DEFAULTS, cfg, { mirror: null });
+  // pass 1: honest score. Every 6th block of 100 moments is hidden from training and used to score it.
+  const L = new E.Learner(C, { samples });
+  L.rebuild();
+  const test = [];
+  L.data.forEach((d, i) => { if (Math.floor(i / 100) % 6 === 3) { test.push(i); d.w = 0; } });
+  L.targetEpochs = cfg.epochs;
+  S.scores = [];
+  $('trainPill').textContent = 'training…'; $('trainPill').className = 'pill live';
+  let last = L.epochs;
+  while (L.epochs < L.targetEpochs) {
+    L.trainTick(12); await frame();
+    if (L.epochs !== last) { last = L.epochs; S.scores.push(Object.assign({ epoch: L.epochs }, evalLearner(L, test, samples))); drawChart(); $('trainBar').style.width = (50 * L.epochs / cfg.epochs) + '%'; }
+  }
+  S.scores.push(Object.assign({ epoch: L.epochs + 1 }, evalLearner(L, test, samples))); drawChart();
+  // pass 2: the brain you download learns from everything
+  $('trainMsg').textContent = 'Scored. Now training the final brain on all of your driving…';
+  const F = new E.Learner(C, { samples });
+  F.rebuild(); F.targetEpochs = cfg.epochs;
+  while (F.epochs < F.targetEpochs) { F.trainTick(12); await frame(); $('trainBar').style.width = (50 + 50 * F.epochs / cfg.epochs) + '%'; }
+  S.trainedNet = F.net.toJSON(); S.brain.v4net = S.trainedNet; S.brain.v4epochs = F.epochs;
+  S.trainCfg = cfg;
+  const fin = S.scores[S.scores.length - 1];
+  $('trainPill').textContent = `trained · ${fmt(fin.bal * 100, 1)}% fair score`; $('trainPill').className = 'pill good';
+  $('trainMsg').textContent = `Done. On driving it never saw, it scores ${fmt(fin.bal * 100, 1)}% (guessing = 33.3%) and calls ${fmt(fin.turn * 100, 0)}% of your turn starts. Download the save to use it.`;
+  renderScoreTable(); S.busy = false; setBusy(false);
+}
+function setBusy(b) { for (const id of ['trainBtn', 'cleanBtn', 'testBtn', 'watchBtn', 'dlBtn', 'practiceBtn', 'pWatchBtn']) $(id).disabled = b; }
+
+function drawChart() {
+  const c = $('chart'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * dpr; c.height = H * dpr; const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement), col = n => css.getPropertyValue(n).trim();
+  const pad = { l: 40, r: 70, t: 12, b: 26 }, iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const n = Math.max(S.scores.length, +$('tEpochs').value);
+  const X = i => pad.l + (n <= 1 ? 0 : (i / (n - 1)) * iw), Y = v => pad.t + ih - (v / 0.7) * ih;
+  g.font = '11px "IBM Plex Mono", monospace'; g.fillStyle = col('--muted'); g.strokeStyle = col('--line'); g.lineWidth = 1;
+  for (const v of [0, 0.2, 0.4, 0.6]) { g.beginPath(); g.moveTo(pad.l, Y(v)); g.lineTo(W - pad.r, Y(v)); g.stroke(); g.fillText((v * 100) + '%', 6, Y(v) + 4); }
+  g.fillText('training passes →', pad.l, H - 6);
+  // guessing line
+  g.setLineDash([4, 4]); g.strokeStyle = col('--muted'); g.beginPath(); g.moveTo(pad.l, Y(1 / 3)); g.lineTo(W - pad.r, Y(1 / 3)); g.stroke(); g.setLineDash([]);
+  g.fillText('guessing 33%', pad.l + 6, Y(1 / 3) - 6);
+  if (!S.scores.length) { g.fillStyle = col('--muted'); g.font = '13px "IBM Plex Sans", sans-serif'; g.fillText('Press Train to see the brain learn, pass by pass.', pad.l + 10, pad.t + 24); return; }
+  const line = (key, color, label) => {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    S.scores.forEach((s, i) => { const x = X(i), y = Y(s[key]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+    const lst = S.scores[S.scores.length - 1], lx = X(S.scores.length - 1), ly = Y(lst[key]);
+    g.fillStyle = color; g.beginPath(); g.arc(lx, ly, 3.5, 0, 7); g.fill();
+    g.fillText(label + ' ' + Math.round(lst[key] * 100) + '%', Math.min(lx + 8, W - pad.r + 6), ly + 4);
+  };
+  line('bal', col('--amber'), 'fair');
+  line('turn', col('--siren-blue'), 'turns');
+}
+function renderScoreTable() {
+  const tb = $('scoreTable').querySelector('tbody');
+  const fin = S.scores[S.scores.length - 1];
+  const rows = [
+    ['Guessing', '33.3%', '0%'],
+    ['Old bot (copies its own steering)', '—', '0%'],
+  ];
+  if (fin) rows.push(['This brain, on driving it never saw', fmt(fin.bal * 100, 1) + '%', fmt(fin.turn * 100, 0) + '%']);
+  tb.innerHTML = '<tr><th>Who</th><th style="text-align:right">Fair score</th><th style="text-align:right">Turn starts called</th></tr>' + rows.map(r => `<tr><td>${r[0]}</td><td class="num">${r[1]}</td><td class="num">${r[2]}</td></tr>`).join('');
+}
+
+// ------------------------------------------------------------------ play style
+function syncStyleUI() {
+  $('pPro').setAttribute('aria-pressed', style.priority === 'pro'); $('pMoney').setAttribute('aria-pressed', style.priority === 'money'); $('pExplore').setAttribute('aria-pressed', style.priority === 'explore');
+  $('sDetour').value = style.bagDetourMax; $('sDetourVal').textContent = style.bagDetourMax + ' m';
+  $('sHorizon').value = style.safetyHorizon; $('sHorizonVal').textContent = fmt(style.safetyHorizon, 1) + ' s';
+  $('sWall').value = style.wallMargin; $('sWallVal').textContent = style.wallMargin;
+  $('sCop').value = style.copPredictS; $('sCopVal').textContent = fmt(style.copPredictS, 2) + ' s';
+  $('sDetour').disabled = style.priority === 'money';
+}
+$('pPro').onclick = () => { style.priority = 'pro'; syncStyleUI(); };
+$('pMoney').onclick = () => { style.priority = 'money'; syncStyleUI(); };
+$('pExplore').onclick = () => { style.priority = 'explore'; syncStyleUI(); toast('Explorer: it drives toward streets it hasn\'t seen yet this run, so it learns more of the city. The test chase uses survive-first.', 6000); };
+$('sDetour').oninput = e => { style.bagDetourMax = +e.target.value; syncStyleUI(); };
+$('sHorizon').oninput = e => { style.safetyHorizon = +e.target.value; syncStyleUI(); };
+$('sWall').oninput = e => { style.wallMargin = +e.target.value; syncStyleUI(); };
+$('sCop').oninput = e => { style.copPredictS = +e.target.value; syncStyleUI(); };
+$('resetStyle').onclick = () => { Object.assign(style, TESTED); syncStyleUI(); };
+$('forgetSecs').oninput = e => { $('forgetSecsVal').textContent = e.target.value + ' s'; $('forgetSecsLbl').textContent = e.target.value; };
+$('tEpochs').oninput = e => { $('tEpochsVal').textContent = e.target.value; drawChart(); };
+$('tL2').oninput = e => { $('tL2Val').textContent = L2S[+e.target.value]; };
+
+// ------------------------------------------------------------------ map
+const view = { img: null, X0: 0, Z0: 0, cell: 1.6, scale: 1, ox: 0, oy: 0 };
+function b64(s) { const b = atob(s), o = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) o[i] = b.charCodeAt(i); return o; }
+function buildMapImage() {
+  const w = S.map.worlds[S.worldKey]; if (!w) { view.img = null; return; }
+  const keys = Object.keys(w.chunks || {}).map(k => k.split(',').map(Number));
+  if (!keys.length) { view.img = null; return; }
+  const X0 = Math.min(...keys.map(k => k[0])), X1 = Math.max(...keys.map(k => k[0])), Z0 = Math.min(...keys.map(k => k[1])), Z1 = Math.max(...keys.map(k => k[1]));
+  const Wd = (X1 - X0 + 1) * 32, Hd = (Z1 - Z0 + 1) * 32;
+  const cv = document.createElement('canvas'); cv.width = Wd; cv.height = Hd;
+  const g = cv.getContext('2d'), im = g.createImageData(Wd, Hd), d = im.data;
+  for (const [cx, cz] of keys) {
+    const bytes = b64(w.chunks[cx + ',' + cz]);
+    for (let iz = 0; iz < 32; iz++) for (let ix = 0; ix < 32; ix++) {
+      const v = bytes[iz * 32 + ix], hi = v >> 4, lo = v & 15;
+      const px = (cx - X0) * 32 + ix, pz = (cz - Z0) * 32 + iz, o = (pz * Wd + px) * 4;
+      let r = 0, gg = 0, b = 0, a = 0;
+      if (lo >= 3 && lo >= hi) { r = 143; gg = 51; b = 64; a = 255; }
+      else if (hi) { const t = Math.min(1, hi / 5); r = 38 + 20 * t; gg = 46 + 23 * t; b = 58 + 28 * t; a = 255; }
+      d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = a;
+    }
+  }
+  // water
+  for (const k of Object.keys(w.water || {})) {
+    const [gx, gz] = k.split(',').map(Number);
+    for (let dz = 0; dz < 4; dz++) for (let dx = 0; dx < 4; dx++) {
+      const px = gx * 4 + dx - X0 * 32, pz = gz * 4 + dz - Z0 * 32; if (px < 0 || pz < 0 || px >= Wd || pz >= Hd) continue;
+      const o = (pz * Wd + px) * 4; d[o] = 47; d[o + 1] = 111; d[o + 2] = 214; d[o + 3] = 255;
+    }
+  }
+  g.putImageData(im, 0, 0);
+  Object.assign(view, { img: cv, X0, Z0 });
+}
+const W2P = (x, z) => [(x / view.cell - view.X0 * 32) * view.scale + view.ox, (z / view.cell - view.Z0 * 32) * view.scale + view.oy];
+function fitMap() {
+  const c = $('map'); if (!view.img) return;
+  const W = c.clientWidth, H = c.clientHeight;
+  view.scale = Math.min(W / view.img.width, H / view.img.height) * 0.95;
+  view.ox = (W - view.img.width * view.scale) / 2; view.oy = (H - view.img.height * view.scale) / 2;
+  S.follow = false; drawMap();
+}
+function drawMap() {
+  const c = $('map'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#0a0d12'; g.fillRect(0, 0, W, H);
+  if (!view.img) { g.fillStyle = '#8a94a6'; g.font = '14px "IBM Plex Sans"'; g.fillText('No map in this save yet.', 20, 40); return; }
+  g.imageSmoothingEnabled = false;
+  g.drawImage(view.img, view.ox, view.oy, view.img.width * view.scale, view.img.height * view.scale);
+  const css = getComputedStyle(document.documentElement), col = n => css.getPropertyValue(n).trim();
+  const sim = S.sim;
+  const bags = sim ? sim.bags : (S.map.worlds[S.worldKey].bags || []);
+  const r = Math.max(2.5, Math.min(6, view.scale * 2.2));
+  for (const b of bags) {
+    const [x, y] = W2P(b.x, b.z); if (x < -10 || y < -10 || x > W + 10 || y > H + 10) continue;
+    g.fillStyle = col('--amber'); g.globalAlpha = sim || b.exact ? 1 : 0.55;
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.globalAlpha = 1;
+  }
+  if (sim) {
+    const path = sim.bot.planner.path;
+    if (path && path.length > 1) { g.strokeStyle = 'rgba(242,182,64,.75)'; g.lineWidth = 2; g.beginPath(); path.forEach((p, i) => { const [x, y] = W2P(p.x, p.z); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); }
+    g.strokeStyle = 'rgba(62,207,142,.5)'; g.lineWidth = 1.5; g.beginPath(); sim.trail.forEach((p, i) => { const [x, y] = W2P(p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+    const flash = Math.floor(performance.now() / 250) % 2;
+    for (const cp of sim.cops) { const [x, y] = W2P(cp.x, cp.z); g.fillStyle = flash ? col('--siren-red') : col('--siren-blue'); g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.fill(); }
+    const [cx, cy] = W2P(sim.car.x, sim.car.z);
+    g.save(); g.translate(cx, cy); g.rotate(-sim.car.h + Math.PI / 2);
+    const L = Math.max(7, r * 2.2); g.fillStyle = col('--good'); g.beginPath(); g.moveTo(L, 0); g.lineTo(-L * .7, L * .55); g.lineTo(-L * .7, -L * .55); g.closePath(); g.fill(); g.restore();
+  }
+}
+// pan / zoom
+(() => {
+  const c = $('map'); let drag = null;
+  c.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy }; c.setPointerCapture(e.pointerId); c.classList.add('dragging'); S.follow = false; });
+  c.addEventListener('pointermove', e => { if (!drag) return; view.ox = drag.ox + e.clientX - drag.x; view.oy = drag.oy + e.clientY - drag.y; drawMap(); });
+  const end = () => { drag = null; c.classList.remove('dragging'); };
+  c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+  c.addEventListener('wheel', e => { e.preventDefault(); const rect = c.getBoundingClientRect(); zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.2 : 1 / 1.2); }, { passive: false });
+})();
+function zoomAt(px, py, f) { const ns = Math.max(0.2, Math.min(12, view.scale * f)); f = ns / view.scale; view.ox = px - (px - view.ox) * f; view.oy = py - (py - view.oy) * f; view.scale = ns; drawMap(); }
+$('zoomIn').onclick = () => { const c = $('map'); zoomAt(c.clientWidth / 2, c.clientHeight / 2, 1.4); };
+$('zoomOut').onclick = () => { const c = $('map'); zoomAt(c.clientWidth / 2, c.clientHeight / 2, 1 / 1.4); };
+$('fitBtn').onclick = fitMap;
+window.addEventListener('resize', () => { drawMap(); drawChart(); });
+
+// ------------------------------------------------------------------ simulation
+function rng(a) { return () => { a |= 0; a = a + 0x6d2b79f5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let freeCache = null;
+function simConfig() { return Object.assign({ imitW: 0 }, style, style.priority === 'explore' ? { priority: 'pro' } : {}); }
+function newEpisode(seed) {
+  const w = S.map.worlds[S.worldKey];
+  // light copy: shares the map chunks, but bags/water start empty so tests don't change your save
+  const map = { version: 1, worlds: { [S.worldKey]: { chunks: w.chunks, bags: [], water: Object.assign({}, w.water || {}), runs: 0 } } };
+  const bot = E.create({ save: { data: { erbot_brain_v3: { samples: [], v4net: S.trainedNet || undefined }, erbot_map_v1: map } }, config: simConfig(), world: S.worldKey });
+  const g = bot.grid, R = rng(seed);
+  const wall = (x, z) => { const [gx, gz] = g.toCell(x, z); const c = g.raw(gx, gz); return !c || c >= 9; };
+  if (!freeCache || freeCache.key !== S.worldKey + Object.keys(w.chunks).length) {
+    const free = [];
+    for (const k of Object.keys(w.chunks)) { const [cx, cz] = k.split(',').map(Number); for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { const gx = cx * 8 + i, gz = cz * 8 + j; const c = g.raw(gx, gz); if (c && c <= 3 && g.openness(gx, gz, 1) > 0.99) free.push(g.toWorld(gx, gz)); } }
+    freeCache = { key: S.worldKey + Object.keys(w.chunks).length, free };
+  }
+  const free = freeCache.free; if (!free.length) return null;
+  const pick = () => free[(R() * free.length) | 0];
+  const [sx, sz] = pick();
+  // start facing the most open direction, like a real run starting on a road
+  let h0 = R() * 6.28, best = -1;
+  for (let i = 0; i < 16; i++) { const a = i / 16 * 6.28; let clear = 0; for (let d = 2; d <= 30; d += 2) { if (wall(sx + Math.sin(a) * d, sz + Math.cos(a) * d)) break; clear = d; } if (clear > best) { best = clear; h0 = a; } }
+  const bags = []; for (let i = 0; i < 25; i++) { const [x, z] = pick(); bags.push({ x, z }); }
+  return { bot, wall, pick, R, car: { x: sx, z: sz, h: h0, v: 15 }, bags, cops: [], got: 0, t: 0, trail: [], done: null };
+}
+function stepEpisode(ep, dt) {
+  const SP = 15, COP = 13.5, { car, bot } = ep;
+  ep.t += dt;
+  if (ep.cops.length < 3 && ep.t > ep.cops.length * 6) {
+    // cops come from behind, like a real chase
+    const a = car.h + Math.PI + (ep.R() - 0.5) * 2.2;
+    for (let r = 35; r < 70; r += 5) { const x = car.x + Math.sin(a) * r, z = car.z + Math.cos(a) * r; if (!ep.wall(x, z)) { ep.cops.push({ x, z }); break; } }
+  }
+  const vis = ep.bags.filter(b => Math.hypot(b.x - car.x, b.z - car.z) < 45);
+  const out = bot.tick({ now: ep.t * 1000, features: null, car: { x: car.x, z: car.z, heading: car.h }, cops: ep.cops.map(c => ({ x: c.x, z: c.z })), visibleBags: vis });
+  ep.mode = out.mode;
+  if (out.throttle > 0) car.v = Math.min(SP, car.v + 10 * dt); else if (out.throttle === 0) car.v = Math.max(0, car.v - 18 * dt); else car.v = Math.max(-6, car.v - 25 * dt);
+  car.h += -out.steer * 2.2 * dt * Math.sign(car.v || 1) * Math.min(1, Math.abs(car.v) / 6);
+  const nx = car.x + Math.sin(car.h) * car.v * dt, nz = car.z + Math.cos(car.h) * car.v * dt;
+  if (ep.wall(nx, nz)) { ep.done = 'hit a wall'; return; }
+  car.x = nx; car.z = nz;
+  for (let i = ep.bags.length - 1; i >= 0; i--) if (Math.hypot(ep.bags[i].x - car.x, ep.bags[i].z - car.z) < 3.5) { ep.got++; const [x, z] = ep.pick(); ep.bags[i] = { x, z }; }
+  for (const c of ep.cops) {
+    const a0 = Math.atan2(car.x - c.x, car.z - c.z);
+    for (const da of [0, .5, -.5, 1, -1, 1.6, -1.6]) { const a = a0 + da, x = c.x + Math.sin(a) * COP * dt, z = c.z + Math.cos(a) * COP * dt; if (!ep.wall(x, z)) { c.x = x; c.z = z; break; } }
+    if (Math.hypot(c.x - car.x, c.z - car.z) < 2.5) { ep.done = 'caught'; return; }
+  }
+  if (ep.t >= 120) ep.done = 'survived 2 min';
+}
+async function runTest() {
+  if (S.busy) return; S.busy = true; setBusy(true); stopWatch();
+  const N = 30, res = []; const t0 = performance.now();
+  $('simResults').innerHTML = `<div class="tile"><div class="k">Testing</div><div class="v" id="simProg">0 / ${N}</div><div class="s">chases on your map</div></div>`;
+  for (let s = 1; s <= N; s++) {
+    const ep = newEpisode(s); if (!ep) break;
+    while (!ep.done) stepEpisode(ep, 1 / 30);
+    res.push(ep); $('simProg').textContent = `${s} / ${N}`; await sleep(0);
+  }
+  const avg = res.reduce((a, e) => a + e.t, 0) / res.length, med = res.map(e => e.t).sort((a, b) => a - b)[res.length >> 1];
+  const by = k => res.filter(e => e.done === k).length;
+  const prev = S.lastTest;
+  const delta = prev ? ` · was ${fmt(prev.avg, 1)} s` : '';
+  $('simResults').innerHTML = [
+    ['Average survival', fmt(avg, 1) + ' s', `median ${fmt(med, 1)} s${delta}`],
+    ['Money per chase', fmt(res.reduce((a, e) => a + e.got, 0) / res.length, 2), style.priority === 'money' ? 'money hunter' : 'pro: survive first'],
+    ['Caught by cops', by('caught') + ' / ' + res.length, ''],
+    ['Hit a wall', by('hit a wall') + ' / ' + res.length, ''],
+    ['Survived 2 min', by('survived 2 min') + ' / ' + res.length, ''],
+  ].map(([k, v, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+  S.lastTest = { avg };
+  S.busy = false; setBusy(false);
+  toast(`Test done in ${fmt((performance.now() - t0) / 1000, 1)} s. Change a setting and test again to compare.`);
+}
+let watchRAF = 0;
+function stopWatch() { cancelAnimationFrame(watchRAF); watchRAF = 0; $('watchBtn').textContent = 'Watch a chase'; S.sim = null; $('hud').innerHTML = ''; drawMap(); }
+function watch() {
+  if (watchRAF) { stopWatch(); return; }
+  const ep = newEpisode((Math.random() * 1e9) | 0); if (!ep) { toast('No explored road to drive on in this map.'); return; }
+  S.sim = ep; S.follow = true; $('watchBtn').textContent = 'Stop';
+  view.scale = Math.max(view.scale, 3);
+  let last = performance.now(), acc = 0;
+  const loop = now => {
+    acc += Math.min(0.1, (now - last) / 1000); last = now;
+    while (acc >= 1 / 30 && !ep.done) { stepEpisode(ep, 1 / 30); acc -= 1 / 30; if ((ep.trail.length === 0) || Math.hypot(ep.trail[ep.trail.length - 1][0] - ep.car.x, ep.trail[ep.trail.length - 1][1] - ep.car.z) > 2) ep.trail.push([ep.car.x, ep.car.z]); }
+    if (S.follow) { const c = $('map'); const [px, py] = W2P(ep.car.x, ep.car.z); view.ox += c.clientWidth / 2 - px; view.oy += c.clientHeight / 2 - py; }
+    const modeName = { escape: 'escaping', bag: 'going for money', water: 'getting out of water', unstuck: 'getting unstuck', policy: 'reacting', route: 'following route' }[ep.mode] || ep.mode || '';
+    $('hud').innerHTML = `<span class="pill live">${fmt(ep.t, 1)} s</span><span class="pill">${ep.got} bag${ep.got === 1 ? '' : 's'}</span><span class="pill">${modeName}</span>` + (ep.done ? `<span class="pill ${ep.done.startsWith('survived') ? 'good' : 'warn'}">${ep.done}</span>` : '');
+    drawMap();
+    if (ep.done) { watchRAF = 0; $('watchBtn').textContent = 'Watch another'; return; }
+    watchRAF = requestAnimationFrame(loop);
+  };
+  watchRAF = requestAnimationFrame(loop);
+}
+$('watchBtn').onclick = watch;
+$('testBtn').onclick = runTest;
+$('cleanBtn').onclick = () => { if (!S.busy) clean(); };
+$('trainBtn').onclick = train;
+
+
+// ------------------------------------------------------------------ practice vs simulated cops
+$('pCount').oninput = e => { $('pCountVal').textContent = e.target.value; };
+$('pCop').oninput = e => { $('pCopVal').textContent = e.target.value + '%'; };
+function brainDriver() {
+  if (!S.trainedNet) return null;
+  try {
+    const net = E.PolicyNet.fromJSON(S.trainedNet), motion = net.nIn > 31; let pf = null;
+    return f => { const x = motion ? E.prepMotion(f, pf) : E.prep(f); pf = f; return Array.from(net.forward(x)); };
+  } catch (e) { return null; }
+}
+async function practice() {
+  if (S.busy || !S.brain) return; S.busy = true; setBusy(true); stopPracticeWatch();
+  const N = +$('pCount').value, copSpeed = +$('pCop').value / 100;
+  const driver = $('pMix').checked ? brainDriver() : null;
+  const res = [], lessons = [], base = (Date.now() % 1e6) | 0, t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    const ep = ERSim.runChase(base + i * 7919, { copSpeed, imitate: driver, mix: driver ? 0.3 : 0 });
+    if (ep) { res.push({ t: ep.t, got: ep.got, done: ep.done }); for (const l of ep.lessons) lessons.push(l); }
+    $('practiceBar').style.width = (100 * (i + 1) / N) + '%';
+    $('practiceMsg').textContent = `Chase ${i + 1} of ${N}…`;
+    await frame();
+  }
+  const keep = S.brain.samples.filter(x => !x.sim), sims = S.brain.samples.filter(x => x.sim).concat(lessons).slice(-6000);
+  S.brain.samples = keep.concat(sims);
+  S.trainedNet = null; delete S.brain.v4net; delete S.brain.v4epochs;
+  $('trainPill').textContent = 'new lessons: train again'; $('trainPill').className = 'pill warn';
+  const avg = res.reduce((a, r) => a + r.t, 0) / Math.max(1, res.length), by = k => res.filter(r => r.done === k).length;
+  $('practiceResults').innerHTML = [
+    ['Teacher survived', fmt(avg, 1) + ' s', 'average per chase'],
+    ['Cash per chase', fmt(res.reduce((a, r) => a + r.got, 0) / Math.max(1, res.length), 1), ''],
+    ['Got away (90 s)', by('got away') + ' / ' + res.length, `${by('arrested')} arrested · ${by('wrecked')} wrecked`],
+    ['Lessons added', fmt(lessons.length), `${fmt(sims.length)} practice lessons kept`],
+  ].map(([k, v, x]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${x}</div></div>`).join('');
+  $('practiceMsg').textContent = `Done in ${fmt((performance.now() - t0) / 1000, 1)} s. Now press Train, then ${window.erbHost ? '"Send to my bot"' : 'download the save'}.`;
+  renderTiles(); S.busy = false; setBusy(false);
+}
+$('practiceBtn').onclick = practice;
+let practiceRAF = 0;
+function stopPracticeWatch() { cancelAnimationFrame(practiceRAF); practiceRAF = 0; $('pWatchBtn').textContent = 'Watch one'; }
+function watchPractice() {
+  if (practiceRAF) { stopPracticeWatch(); return; }
+  const ep = ERSim.newChase((Math.random() * 1e9) | 0, { copSpeed: +$('pCop').value / 100, imitate: $('pMix').checked ? brainDriver() : null, mix: 0.3 });
+  if (!ep) return;
+  const cv = $('simView'); cv.hidden = false;
+  const N = ep.city.N, img = document.createElement('canvas'); img.width = N; img.height = N;
+  const ic = img.getContext('2d'), id = ic.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) { const w = ep.city.wall[i], c = w === 2 ? [32, 70, 140] : w ? [120, 48, 60] : [44, 52, 66]; id.data.set([c[0], c[1], c[2], 255], i * 4); }
+  ic.putImageData(id, 0, 0);
+  $('pWatchBtn').textContent = 'Stop';
+  let last = performance.now();
+  const loop = now => {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    for (let k = 0; k < 3 && !ep.done; k++) ERSim.step(ep, dt / 3);
+    const W = cv.clientWidth; cv.width = W * devicePixelRatio; cv.height = W * devicePixelRatio;
+    const g = cv.getContext('2d'), view = 90, sc = cv.width / view, ox = ep.car.x - view / 2, oz = ep.car.z - view / 2;
+    g.imageSmoothingEnabled = false; g.drawImage(img, ox, oz, view, view, 0, 0, cv.width, cv.height);
+    const dot = (x, z, r, col) => { g.fillStyle = col; g.beginPath(); g.arc((x - ox) * sc, (z - oz) * sc, r * sc, 0, 7); g.fill(); };
+    for (const b of ep.bags) dot(b.x, b.z, 1, '#f2b640');
+    for (const o of ep.traffic) dot(o.x, o.z, 1.2, '#9aa3b2');
+    for (const c of ep.cops) dot(c.x, c.z, 1.3, '#ff5468');
+    dot(ep.car.x, ep.car.z, 1.3, '#3ecf8e');
+    g.fillStyle = '#fff'; g.font = `${14 * devicePixelRatio}px IBM Plex Mono, monospace`;
+    g.fillText(`${fmt(ep.t, 1)} s · ${ep.got} cash · ${ep.cops.length} cops${ep.done ? ' · ' + ep.done : ''}`, 8 * devicePixelRatio, 20 * devicePixelRatio);
+    if (ep.done) { practiceRAF = 0; $('pWatchBtn').textContent = 'Watch another'; return; }
+    practiceRAF = requestAnimationFrame(loop);
+  };
+  practiceRAF = requestAnimationFrame(loop);
+}
+$('pWatchBtn').onclick = watchPractice;
+
+// ------------------------------------------------------------------ live stats from the app
+async function pollLive() {
+  if (!window.erbHost || !window.erbHost.getStats) return;
+  $('livePanel').hidden = false;
+  let st = null; try { st = JSON.parse(await window.erbHost.getStats()); } catch (e) { st = null; }
+  if (!st || !st.bot) { $('liveState').textContent = 'game loading…'; $('liveState').className = 'pill warn'; return; }
+  const b = st.bot, runs = b.runs, botRuns = runs.filter(r => !r[3]), avg = a => a.length ? a.reduce((t, r) => t + r[0], 0) / a.length : 0;
+  const last10 = botRuns.slice(-10), prev10 = botRuns.slice(-20, -10);
+  const trend = prev10.length ? (avg(last10) >= avg(prev10) ? '▲ up from ' : '▼ down from ') + fmt(avg(prev10), 1) + ' s' : 'needs 20 runs to compare';
+  const goal = { money: 'cash first', pro: 'survive first', explore: 'exploring the map' }[b.goal] || b.goal || '';
+  $('liveState').textContent = `${b.on ? 'driving' : 'bot off'} · ${b.mode}${b.mode === 'play' ? ' ' + fmt(b.now, 0) + ' s' : ''} · ${st.games.length} game${st.games.length === 1 ? '' : 's'} running`;
+  $('liveState').className = 'pill ' + (b.on ? 'live' : 'warn');
+  const tiles = [
+    ['Bot survival (last 10)', fmt(avg(last10), 1) + ' s', trend],
+    ['Best time', fmt(b.best, 1) + ' s', `${fmt(b.totalRuns)} attempts in total`],
+    ['Points', fmt(b.points, 0), `best ${fmt(b.bestPoints, 0)} · ${b.level}${b.next ? ' (next at ' + fmt(b.next) + ')' : ''}`],
+    ['Lessons', fmt(b.samples), `${fmt(b.human)} you · ${fmt(b.bot)} bot · ${fmt(b.crash)} crash · ${fmt(b.sim)} practice`],
+    ['Brain', b.net ? (b.net.trained ? fmt(Math.min(100, 100 * b.net.epochs / 30)) + '%' : 'warming up') : '—', b.net ? `${fmt(b.net.epochs)} training passes${b.net.motion ? ' · uses motion' : ''}` : ''],
+    ['City pieces', fmt(b.pieces), 'building pieces it knows by heart'],
+    ['Cash this session', fmt(b.bagsTaken), `goal: ${goal}`],
+    ['Stuck runs ended', fmt(b.gaveUp), 'ended because it was stuck'],
+  ];
+  $('liveTiles').innerHTML = tiles.map(([k, v, x]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${x}</div></div>`).join('');
+  drawLiveChart(runs);
+}
+function drawLiveChart(runs) {
+  const cv = $('liveChart'), W = cv.clientWidth, H = cv.clientHeight; cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+  const g = cv.getContext('2d'); g.scale(devicePixelRatio, devicePixelRatio); g.clearRect(0, 0, W, H);
+  const rs = runs.slice(-80); if (!rs.length) return;
+  const max = Math.max(30, ...rs.map(r => r[0])), bw = W / rs.length;
+  rs.forEach((r, i) => { const h = (H - 16) * r[0] / max; g.fillStyle = r[3] ? '#4f9cff' : '#3ecf8e'; g.globalAlpha = 0.75; g.fillRect(i * bw + 1, H - h, Math.max(1, bw - 2), h); });
+  g.globalAlpha = 1; g.strokeStyle = '#f2b640'; g.lineWidth = 2; g.beginPath(); let started = false;
+  rs.forEach((r, i) => { const win = rs.slice(Math.max(0, i - 9), i + 1).filter(q => !q[3]); if (!win.length) return; const a = win.reduce((t, q) => t + q[0], 0) / win.length, y = H - (H - 16) * a / max; started ? g.lineTo(i * bw + bw / 2, y) : g.moveTo(i * bw + bw / 2, y); started = true; });
+  g.stroke(); g.fillStyle = '#8a94a6'; g.font = '11px IBM Plex Mono, monospace'; g.fillText(fmt(max, 0) + ' s', 4, 11);
+}
+if (window.erbHost && window.erbHost.getStats) { pollLive(); setInterval(pollLive, 2000); }
+
+// ------------------------------------------------------------------ load / download
+$('fileIn').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { stopWatch(); load(await f.text(), f.name); } catch (err) { toast('Could not load that file: ' + err.message, 6000); }
+  e.target.value = '';
+};
+function buildSaveText() {
+  const o = S.save;
+  o.saved = new Date().toISOString();
+  o.data.erbot_brain_v3 = JSON.stringify(S.brain);
+  o.data.erbot_map_v1 = JSON.stringify(S.map);
+  o.data.erbot_v4_config = JSON.stringify(Object.assign({}, style, S.trainCfg ? { motion: S.trainCfg.motion, balance: S.trainCfg.balance, l2: S.trainCfg.l2, epochs: S.trainCfg.epochs } : {}));
+  return JSON.stringify(o);
+}
+let downloads = null;
+$('dlBtn').onclick = async () => {
+  if (!S.save) return;
+  const text = buildSaveText();
+  if (window.erbHost) {   // inside the Escape Road Bot app: hand the trained save straight to the bot
+    try { await window.erbHost.applySave(text); toast('Sent to your bot. The game reloads with the new brain and play style.', 6000); }
+    catch (err) { toast('Could not send it to the bot: ' + (err && err.message || err), 6000); }
+    return;
+  }
+  if (!downloads) { toast('Downloads are not available in this view. Open the page on claude.ai to download.', 6000); return; }
+  try { await downloads.save({ filename: 'escape-road-bot-trained.json', data: text }); toast('Saved. Load it into your bot to use the new brain and play style.'); }
+  catch (err) { if (err && err.code === 'declined') return; toast('Download did not go through (' + (err && err.code || 'error') + ').', 6000); }
+};
+
+// ------------------------------------------------------------------ start
+(async () => {
+  renderScoreTable(); drawChart();
+  try {
+    if (window.erbHost) { load(await window.erbHost.getSave(), 'your bot'); $('dlBtn').textContent = 'Send to my bot'; }
+    else { const r = await fetch('save.json'); if (!r.ok) throw new Error('HTTP ' + r.status); load(await r.text()); }
+  } catch (e) {
+    $('tiles').innerHTML = '<div class="tile"><div class="k">No save loaded</div><div class="v">—</div><div class="s">Use “Load another save” to open your bot\'s save file.</div></div>';
+  }
+  try { downloads = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) { downloads = null; }
+})();
+})();
+</script>
+</body>
+</html>
