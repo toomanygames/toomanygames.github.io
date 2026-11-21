@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.11.1';
+window.ERBOT_VERSION = '1.11.2';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -539,6 +539,23 @@ function getState(im){
 B.getState = getState;
 function findCloseButton(im){
   const W = im.width, H = im.height, d = im.data; const pts = [];
+  // orange X (most pop-ups) or red X (daily bonus), in the top 60% of the screen
+  for (let y = 0; y < H*0.6; y += 2) for (let x = 0; x < W; x += 2) { const i = 4*(y*W+x), r = d[i], g = d[i+1], b = d[i+2];
+    if ((Math.abs(r-192) < 30 && Math.abs(g-81) < 30 && Math.abs(b-30) < 30) || (r > 170 && g < 90 && b < 90 && x > W*0.55)) pts.push([x, y]); }
+  if (pts.length < 6) return null;
+  let best = null, bc = 0; for (const p of pts) { let c = 0; for (const q of pts) if (Math.abs(p[0]-q[0]) < 9 && Math.abs(p[1]-q[1]) < 9) c++; if (c > bc) { bc = c; best = p; } }
+  if (bc < 6) return null;
+  const cl = pts.filter(q => Math.abs(best[0]-q[0]) < 11 && Math.abs(best[1]-q[1]) < 11);
+  return { x: cl.reduce((s, q) => s + q[0], 0)/cl.length/W, y: cl.reduce((s, q) => s + q[1], 0)/cl.length/H };
+}
+// a highlighted (blue) tile in the middle of the screen: today's daily bonus, tap it to collect
+function findDailyTile(im){
+  const W = im.width, H = im.height, d = im.data; let sx = 0, sy = 0, n = 0;
+  for (let y = Math.floor(H*0.3); y < H*0.7; y += 2) for (let x = Math.floor(W*0.1); x < W*0.9; x += 2) { const i = 4*(y*W+x), r = d[i], g = d[i+1], b = d[i+2]; if (b > 180 && b > r + 60 && g > 120) { sx += x; sy += y; n++; } }
+  return n > 40 ? { x: sx/n/W, y: sy/n/H } : null;
+}
+function findCloseButtonOld(im){
+  const W = im.width, H = im.height, d = im.data; const pts = [];
   for (let y = 0; y < H*0.6; y++) for (let x = 0; x < W; x++) { const i = 4*(y*W+x); if (Math.abs(d[i]-192) < 30 && Math.abs(d[i+1]-81) < 30 && Math.abs(d[i+2]-30) < 30) pts.push([x, y]); }
   if (pts.length < 20) return null;
   let best = null, bc = 0; for (const p of pts) { let c = 0; for (const q of pts) if (Math.abs(p[0]-q[0]) < 7 && Math.abs(p[1]-q[1]) < 7) c++; if (c > bc) { bc = c; best = p; } }
@@ -645,7 +662,9 @@ async function supervise(){
       if (!im2 || getState(im2) === 'menu') { await B.tap('d'); await sleep(1200); }
     }
     else if (s === 'over' && now - stateSince > 1500) { await B.click(0.745*innerWidth, 0.826*innerHeight); await sleep(2000); }
-    else if (s === 'popup' && now - stateSince > 700) { if (B.claimRewards) { try { await B.claimRewards(); } catch (e) {} } const im3 = await Promise.race([B.grabOnce(), sleep(1500).then(() => null)]) || im; const b = findCloseButton(im3); if (b) await B.click(b.x*innerWidth, b.y*innerHeight); await sleep(900); }
+    else if (s === 'popup' && now - stateSince > 700) { if (B.claimRewards) { try { await B.claimRewards(); } catch (e) {} } const im3 = await Promise.race([B.grabOnce(), sleep(1500).then(() => null)]) || im; const b = findCloseButton(im3); if (b) await B.click(b.x*innerWidth, b.y*innerHeight);
+      else { const t = findDailyTile(im3); if (t) await B.click(t.x*innerWidth, t.y*innerHeight); else if (now - stateSince > 6000) { await B.tap('Escape', 90); } }
+      await sleep(900); }
     updateHud();
     await sleep(250);
   }
