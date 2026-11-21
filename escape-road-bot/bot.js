@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.6.0';
+window.ERBOT_VERSION = '1.7.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -575,7 +575,7 @@ const HELP = [
   ['lessons', 'Moments learned from your driving.'],
   ['attempts', 'Past runs it learned from.'],
   ['city pieces learned', 'Map pieces it knows, to plan around unseen walls.'],
-  ['heading for cash / open road', 'Where its route goes: a cash stack, or open road away from where the cops are heading.'],
+  ['heading for cash / open road / new streets', 'Where its route goes: a cash stack, open road away from where the cops are heading, or (explore goal) streets it hasn\u2019t driven yet.'],
   ['brain % trained', 'How far its driving brain (a small neural net) has trained on your driving and its attempts.'],
   ['getting unstuck / out of water', 'Backing up to the last dry road it drove on, or driving to open road.'],
   ['on foot', 'Out of the car, getting back in.'],
@@ -1347,7 +1347,7 @@ E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.
   const DEFAULTS = {
     plannerShareMs: 1.0, replanEveryMs: 400, maxExpansionsPerSlice: 1200,
     copAvoidRadius: 14, bagMergeRadius: 4, bagViewRadius: 45,
-    hidden: 32, learnRate: 0.003, l2: 0.03, epochs: 30,
+    hidden: 32, learnRate: 0.003, l2: 0.03, epochs: 30, motion: true, balance: 3,
     priority: 'money', bagDetourMax: 55, bagAngleMax: 0.9, bagSafeCopDist: 28,
     copPredictS: 1.0, escMomentum: 2.5, escCopW: 0.083, escRadii: [18, 28],
     wallMargin: 3, steerGain: 1.8,
@@ -1366,6 +1366,13 @@ E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.
     return x;
   }
   const N_IN = 31;
+  // motion: also how every input changed since ~0.1 s ago (same as the Trainer)
+  function prepMotion(f, pf) {
+    const a = prep(f), b = pf ? prep(pf) : a, x = new Float32Array(N_IN + 29); x.set(a);
+    let k = N_IN; for (let i = 0; i < N_IN; i++) { if (i === 13 || i === 14) continue; x[k++] = a[i] - b[i]; }
+    return x;
+  }
+  function jumped(f, pf) { let s = 0; for (let i = 0; i < 13; i++) s += Math.abs(f[i] - pf[i]); return s > 4; }
 
   class PolicyNet {
     constructor(nIn, nH, seed = 1) {
@@ -1422,12 +1429,21 @@ E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.
   class Learner {
     constructor(cfg, brain) {
       this.cfg = cfg; this.brain = brain; this.rand = mulberry32(7);
-      this.net = brain.v4net && brain.v4net.nIn === N_IN ? PolicyNet.fromJSON(brain.v4net) : new PolicyNet(N_IN, cfg.hidden);
-      this.trained = !!brain.v4net; this.epochs = brain.v4epochs || 0; this.dirty = true; this._order = null; this._pos = 0;
+      const ok = brain.v4net && (brain.v4net.nIn === N_IN || brain.v4net.nIn === N_IN + 29);
+      this.net = ok ? PolicyNet.fromJSON(brain.v4net) : new PolicyNet(cfg.motion ? N_IN + 29 : N_IN, cfg.hidden);
+      this.motion = this.net.nIn === N_IN + 29;
+      if (!ok) { brain.v4net = undefined; brain.v4epochs = 0; }
+      this.trained = !!(ok); this.epochs = ok ? (brain.v4epochs || 0) : 0; this.dirty = true; this._order = null; this._pos = 0;
     }
     rebuild() {
-      const data = [];
-      for (const s of this.brain.samples || []) if (s.f && s.f.length === 31) data.push({ x: prep(s.f), k: s.u + 1, w: s.w });
+      const data = [], cls = [0, 0, 0]; let prev = null;
+      for (const s of this.brain.samples || []) {
+        if (!s.f || s.f.length !== 31) { prev = null; continue; }
+        const pf = prev && !jumped(s.f, prev) ? prev : null;
+        data.push({ x: this.featurize(s.f, pf), k: s.u + 1, w: s.w }); if (s.w > 0) cls[s.u + 1] += s.w;
+        prev = s.f;
+      }
+      if (this.cfg.balance) { const tot = cls[0] + cls[1] + cls[2] || 1; const cw = cls.map(c => c > 0 ? Math.min(this.cfg.balance, tot / (3 * c)) : 1); for (const d of data) if (d.w > 0) d.w *= cw[d.k]; }
       this.data = data;
       if (this.targetEpochs === undefined) this.targetEpochs = this.trained ? this.epochs + 4 : this.cfg.epochs;
       else this.targetEpochs = Math.max(this.targetEpochs, this.epochs + 8);
@@ -1452,7 +1468,8 @@ E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.
       }
       return now() - t0;
     }
-    policy(f) { return this.net.forward(prep(f)); }
+    featurize(f, pf) { return this.motion ? prepMotion(f, pf) : prep(f); }
+    policy(f, pf) { return this.net.forward(this.featurize(f, pf)); }
     save() { this.brain.v4net = this.net.toJSON(); this.brain.v4epochs = this.epochs; }
   }
 
@@ -1613,7 +1630,7 @@ E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.
     }
   }
 
-  root.ERBot4 = { DEFAULTS, prep, PolicyNet, Learner, Planner, BagMemory, Strategist, Recovery };
+  root.ERBot4 = { DEFAULTS, prep, prepMotion, PolicyNet, Learner, Planner, BagMemory, Strategist, Recovery };
 })(window);
 
 /* ERBot combine: plugs the other chat's v4 parts (v4core.js) into this bot.
@@ -1685,6 +1702,31 @@ const strat = new V4.Strategist(cfg, grid);
 const recov = new V4.Recovery(cfg, grid);
 E.v4 = { learner, planner, bagMem, strat, recov, grid };
 let lastPlan = -1e9;
+const fh = [];   // recent features, for the brain's 'how things are changing' inputs
+
+/* ---- explore mode: head for parts of the map it hasn't driven through yet this run */
+const visited = new Set(); const VC = 8;
+const vkey = (x, z) => Math.floor(x/VC) + ',' + Math.floor(z/VC);
+E.explore = { visited };
+function exploreGoal(car, hx, hz, cops, t){
+  // cash that is close and ahead is still worth a quick detour
+  for (const b of bagMem.candidates()) { const dx = b.x - car.x, dz = b.z - car.z, d = Math.hypot(dx, dz); if (d < 22 && (dx*hx + dz*hz)/(d + 1e-6) > 0.6) return { x: b.x, z: b.z, kind: 'bag', bag: b }; }
+  const copDist = (x, z) => { let m = 1e9; for (const c of cops) m = Math.min(m, Math.hypot(x - c.x, z - c.z)); return m; };
+  const here = copDist(car.x, car.z); let best = null, bs = -1e9;
+  for (const R of [20, 30]) for (let i = 0; i < 24; i++) {
+    const a = i/24*Math.PI*2, dx = Math.cos(a), dz = Math.sin(a), x = car.x + dx*R, z = car.z + dz*R;
+    const [gx, gz] = grid.toCell(x, z), c = grid.cost(gx, gz); if (!c || c >= 12) continue;
+    let fresh = 0; for (const ox of [-VC, 0, VC]) for (const oz of [-VC, 0, VC]) if (!visited.has(vkey(x + ox, z + oz))) fresh++;
+    let sc = 3*fresh/9 + 2*grid.openness(gx, gz) - c*0.3;
+    const align = dx*hx + dz*hz; sc += 1.5*align + (align < -0.3 ? -2 : 0);
+    sc += (Math.min(60, copDist(x, z)) - Math.min(60, here))*0.06;
+    for (const cp of cops) { const cx = cp.x - car.x, cz = cp.z - car.z, cd = Math.hypot(cx, cz) + 1e-6, tw = (cx*dx + cz*dz)/cd; if (tw > 0.5 && cd < R + 10) sc -= 3*tw*(1 - cd/(R + 30)); }
+    if (strat.target && strat.target.kind === 'explore' && Math.hypot(x - strat.target.x, z - strat.target.z) < 10) sc += 1;
+    if (sc > bs) { bs = sc; best = { x, z, kind: 'explore' }; }
+  }
+  return best;
+}
+E.setPriority = p => { cfg.priority = p; strat.target = null; lastPlan = -1e9; };
 
 /* ---- wrap the driving planner */
 const basePlan = E.planSteer;
@@ -1693,22 +1735,25 @@ E.planSteer = function(p, gy, steerState, pol, car){
   grid.newFrame();
   // 1) habits: the neural net once it has trained enough, blended with the old habit
   if (learner.trained && learner.epochs >= 5) {
-    const q = learner.policy(E.features(p));
+    const fv = E.features(p);
+    fh.push([t, fv]); while (fh.length > 2 && t - fh[1][0] >= 100) fh.shift();   // keep the features from ~0.1 s ago
+    const q = learner.policy(fv, fh.length > 1 && t - fh[0][0] < 400 ? fh[0][1] : null);
     pol = pol ? { '-1': 0.65*q[0] + 0.35*pol['-1'], '0': 0.65*q[1] + 0.35*pol['0'], '1': 0.65*q[2] + 0.35*pol['1'] } : { '-1': q[0], '0': q[1], '1': q[2] };
   }
   // 2) where to go
   const car2 = { x: p.x, z: p.z };
+  visited.add(vkey(p.x, p.z));
   const sp = p.speed || 0, hx = sp > 1 ? p.vx/sp : Math.cos(p.th), hz = sp > 1 ? p.vz/sp : Math.sin(p.th);
   const cops = strat.trackCops(t, (E.others || []).filter(o => Math.hypot(o.vx, o.vz) > 3));
   bagMem.observe((E.targets || []).filter(b => !b.guess), t, car2);
   if (!planner.job && t - lastPlan > cfg.replanEveryMs) {
-    strat.target = strat.chooseGoal(car2, hx, hz, cops, bagMem.candidates(), t);
+    strat.target = cfg.priority === 'explore' ? exploreGoal(car2, hx, hz, cops, t) : strat.chooseGoal(car2, hx, hz, cops, bagMem.candidates(), t);
     if (strat.target) planner.start(car2, strat.target, cops);
     lastPlan = t;
   }
   planner.step(cfg.plannerShareMs);
   const la = planner.lookahead(car2, 6 + Math.min(8, sp*0.4));
-  E.goal = la || (strat.target && strat.target.kind === 'escape' ? strat.target : null);
+  E.goal = la || (strat.target && strat.target.kind !== 'bag' ? strat.target : null);
   E.goalKind = strat.target ? strat.target.kind : null;
   // 3) stuck or in water: v4 recovery takes the wheel
   const fwd = { x: Math.cos(p.th), z: Math.sin(p.th) };
@@ -1731,7 +1776,7 @@ E.v4owned = true;   // tells the brain to leave stuck handling to the recovery a
 
 /* ---- runs */
 const prevStart = E.onRunStart;
-E.onRunStart = () => { if (prevStart) prevStart(); bagMem.clear(); recov.reset(); strat.target = null; strat._cops = []; planner.job = null; planner.path = null; E.goal = null; lastPlan = -1e9; };
+E.onRunStart = () => { if (prevStart) prevStart(); bagMem.clear(); visited.clear(); fh.length = 0; recov.reset(); strat.target = null; strat._cops = []; planner.job = null; planner.path = null; E.goal = null; lastPlan = -1e9; };
 const prevEnd = E.onRunEnd;
 E.onRunEnd = (dur) => { if (prevEnd) prevEnd(dur); learner.dirty = true; learner.save(); E.saveBrain(true); };
 // save the trained net now and then too
@@ -1739,7 +1784,7 @@ setInterval(() => { if (learner.trained) learner.save(); }, 30000);
 
 const prevHud = E.hudExtra;
 E.hudExtra = () => (prevHud ? prevHud() : '') +
-  (E.recMode ? ` | ${E.recMode === 'water' ? 'getting out of water' : 'getting unstuck'}` : E.goalKind ? ` | heading for ${E.goalKind === 'bag' ? 'cash' : 'open road'}` : '') +
+  (E.recMode ? ` | ${E.recMode === 'water' ? 'getting out of water' : 'getting unstuck'}` : E.goalKind ? ` | heading for ${E.goalKind === 'bag' ? 'cash' : E.goalKind === 'explore' ? 'new streets' : 'open road'}` : '') +
   ` | brain ${learner.trained ? Math.min(100, Math.round(100*learner.epochs/30)) + '% trained' : 'warming up'}`;
 })();
 
