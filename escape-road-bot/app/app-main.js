@@ -331,6 +331,7 @@ app.whenReady().then(() => {
   if (process.env.ERB_SELFTEST) setTimeout(async () => {
     if (process.env.ERB_SELFTEST_UPDATE) { await checkUpdates(false); console.log('UPDATEDIR', JSON.stringify(fs.existsSync(updateDir()) ? fs.readdirSync(updateDir()) : null)); }
     console.log('APPVERSION', APP_VERSION, __dirname);
+    if (process.env.ERB_SELFTEST_GARAGE) { console.log('PREFS', await js('ERBot.readPrefs().then(p => JSON.stringify(p), e => "err " + e)')); console.log('BEFORE', await js('ERBot.beforeRun().then(() => JSON.stringify({ money: ERBot.money, gs: ERBot.garageState, err: ERBot.err || null, hooks: Object.keys(ERBot.hooks), roadExtra: typeof ERBot.roadExtra, swap: ERBot.dmg.phase }))')); }
     const out = [];
     for (const g of games) out.push(await jsIn(g, 'JSON.stringify({ url: location.href, ref: document.referrer, bot: !!window.ERBot, v: window.ERBOT_VERSION, worker: window.__erbWorker, hub: !!window.__erbHub, enabled: window.ERBot && window.ERBot.enabled, samples: window.ERBot && window.ERBot.brain && window.ERBot.brain.samples.length, ls: (localStorage.getItem("erbot_brain_v3") || "").length })'));
     console.log('SELFTEST', JSON.stringify(out), 'title=', win.getTitle());

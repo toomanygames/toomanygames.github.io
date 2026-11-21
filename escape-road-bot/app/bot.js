@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.9.1';
+window.ERBOT_VERSION = '1.10.0';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -309,7 +309,7 @@ function findPlayer(f){
   const cx = g[0] - B.cfg.camOffX, cz = g[1] - B.cfg.camOffZ; const T = B.ptrack;
   let best = null, bs = 1e9;
   for (const o of f.objs) {
-    if (o.y < -1.5 || o.y > 3 || o.n < 150) continue;
+    if (o.y < -1.5 || (o.y > 3 && !(T.mesh && o.mesh === T.mesh)) || o.y > 80 || o.n < 150) continue;   // a plane we fly can be high up
     let s;
     if (T.mesh && o.mesh === T.mesh && f.t - T.t < 500) s = Math.hypot(o.x - T.x, o.z - T.z) * 0.5;
     else s = Math.hypot(o.x - cx, o.z - cz) + (T.mesh && f.t - T.t < 500 ? 3 : 0);
@@ -582,7 +582,11 @@ const HELP = [
   ['in the water / at the shore', 'It fell in the water: it heads for the closest land, then stops at the edge and waits until it is out before driving on.'],
   ['on foot', 'Out of the car, getting back in.'],
   ['backing up', 'Stuck, reversing out.'],
-  ['car damaged / swaps', 'Car smoking or burning: switching cars.'],
+  ['black smoke … heading for …', 'The vehicle is pouring black smoke, burning or badly damaged: it picks the next vehicle (planes, helicopters and boats first), drives toward it, and gets out only when no cop or car can run it over.'],
+  ['on foot: going to …', 'Walking to the vehicle it chose, then getting in.'],
+  ['vehicles swapped / driving a boat …', 'How many times it changed vehicles, and what it is driving if it is not a car (it learns this from how the vehicle moves).'],
+  ['money', 'Your money in the game. It only spins the car machine with $500 or more, and only visits the garage after a spin.'],
+  ['on road %', 'How much of the time it drives on roads. Roads are the fast way; it goes off-road for big shortcuts or to lose the cops.'],
   ['new cars won', 'Won on the slot machine; it drives your rarest car.'],
   ['rewards claimed', 'Free rewards collected.'],
   ['gave up stuck runs', 'Runs it ended because it got stuck.'],
@@ -848,7 +852,7 @@ E.planSteer = function(p, groundY, steerState, pol, car){
   const vang0 = p.speed > 3 ? Math.atan2(p.vz, p.vx) : p.th;
   const others = E.others || [];
   let tg = E.targets || [];
-  if (onFoot) tg = tg.concat(others.filter(o => Math.hypot(o.vx, o.vz) < 3).map(o => ({ x:o.x, z:o.z })));
+  if (onFoot) tg = E.footTargets && E.footTargets.length ? E.footTargets : tg.concat(others.filter(o => Math.hypot(o.vx, o.vz) < 3).map(o => ({ x:o.x, z:o.z })));
   let best = null;
   for (const brake of (onFoot ? [0] : [0, 1])) for (const u1 of [-1, 0, 1]) for (const t1 of T1S) for (const u2 of [-1, 0, 1]) {
     if (t1 >= C.horizon && u2 !== 0) continue;
@@ -1166,55 +1170,6 @@ const prevHud = E.hudExtra;
 E.hudExtra = () => { const m = E.mapStats(); return (prevHud ? prevHud() : '') + ` | city pieces learned ${m.known}`; };
 })();
 
-/* ERBot car swap: when the car is badly damaged (smoking / burning), hop out next to another
- * vehicle and steal it. Needs core + extras + brain.
- * Damage is tracked two ways:
- *   - hits: every hard impact (sudden loss of speed) adds damage; a new car resets it
- *   - looks: fire-coloured and smoke-coloured pixels right around the car on screen */
-(function(){
-const E = window.ERBot; if (!E || !E.G) return;
-E.dmg = { hits: 0, score: 0, mesh: null, lastSp: 0, lastT: 0, smoke: 0, fire: 0, swapAt: 0, exitedAt: 0 };
-E.cfg.swapDamage = E.cfg.swapDamage || 5;      // damage points before we want a new car
-const cc = document.createElement('canvas'); cc.width = 64; cc.height = 64;
-const cx = cc.getContext('2d', { willReadFrequently: true });
-function looks(f, p){
-  // sample a box above and around the car; smoke rises, fire is orange
-  const M = f.vp; const ppm = Math.abs(M[0])*E.uc.width/2*1.414;
-  const sx = M[0]*p.x + M[4]*(p.y+1.2) + M[8]*p.z + M[12], sy = M[1]*p.x + M[5]*(p.y+1.2) + M[9]*p.z + M[13];
-  const px = (sx+1)/2*E.uc.width, py = (1-sy)/2*E.uc.height; const R = ppm*2.2;
-  cx.drawImage(E.uc, px-R, py-R*1.4, 2*R, 1.6*R, 0, 0, 64, 64);
-  const d = cx.getImageData(0, 0, 64, 64).data; let fire = 0, smoke = 0;
-  for (let i = 0; i < d.length; i += 4) { const r = d[i], g = d[i+1], b = d[i+2]; const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    if (r > 210 && g > 70 && g < 200 && b < 70 && r - g > 45) fire++;
-    else if (mx - mn < 14 && mx > 40 && mx < 110) smoke++; }
-  return [fire/4096, smoke/4096];
-}
-let fc = 0;
-E.hooks.swap = function(f){
-  const D = E.dmg, p = E.player;
-  if (!E.enabled || E.mode !== 'play' || !p || !f.vp || (E.humanActive && E.humanActive())) return;
-  if (E.footState && E.footState.on) { D.hits = 0; D.score = 0; D.mesh = null; return; }
-  if (p.mesh !== D.mesh) { D.mesh = p.mesh; D.hits = 0; D.score = 0; D.smoke = 0; D.fire = 0; D.lastSp = p.speed; D.lastT = f.t; return; }
-  // hard impacts
-  const dt = (f.t - D.lastT)/1000;
-  if (dt > 0 && dt < 0.3 && D.lastSp - p.speed > 6 && D.lastSp > 9) { D.hits++; D.score += 1 + Math.min(2, (D.lastSp - p.speed)/10); }
-  D.lastSp = p.speed; D.lastT = f.t;
-  // what the car looks like (smoothed)
-  if ((++fc) % 6 === 0) { const [fi, sm] = looks(f, p); D.fire = D.fire*0.8 + fi*0.2; D.smoke = D.smoke*0.8 + sm*0.2; }
-  const burning = D.fire > 0.025;
-  const wantSwap = D.score >= E.cfg.swapDamage || (burning && D.score >= 2);
-  D.want = wantSwap;
-  if (!wantSwap || f.t - D.exitedAt < 4000) return;
-  // only jump out when there is a slow vehicle right next to us and nothing fast closing in
-  const others = E.others || [];
-  const ride = others.filter(o => Math.hypot(o.vx, o.vz) < 4 && Math.hypot(o.x - p.x, o.z - p.z) < 7).sort((a, b) => Math.hypot(a.x-p.x, a.z-p.z) - Math.hypot(b.x-p.x, b.z-p.z))[0];
-  const threat = others.some(o => Math.hypot(o.vx, o.vz) > 6 && Math.hypot(o.x - p.x, o.z - p.z) < 6);
-  if (ride && !threat) { D.exitedAt = f.t; E.swaps = (E.swaps || 0) + 1; E.releaseAll(); E.tap(' ', 90); }   // out; the on-foot logic then runs to the nearest car and presses Space
-};
-const prevHud = E.hudExtra;
-E.hudExtra = () => (prevHud ? prevHud() : '') + (E.dmg.want ? ' | car damaged, looking for a new one' : '') + (E.swaps ? ` | swaps ${E.swaps}` : '');
-})();
-
 /* ERBot garage: between runs, collect free rewards, spin for new cars with spare cash,
  * and drive the best (rarest) car you own. Needs core. Runs from the menu screen only. */
 (function(){
@@ -1319,21 +1274,70 @@ E.spinForCars = async (maxSpins = 3) => {
   return spins;
 };
 
-/* ---- run all of this from the menu, at most every few runs ---- */
+/* ---- the game's own save (Unity PlayerPrefs): money, spins, which cars you own ---- */
+function parsePrefs(b){
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), out = {}; let i = 16;
+  const str = () => { let L = b[i++]; if (L === 0x80) { L = dv.getInt32(i, true); i += 4; } const s2 = new TextDecoder().decode(b.slice(i, i + L)); i += L; return s2; };
+  while (i < b.length && b[i] !== 0) { const key = str(); const t = b[i]; if (t === 0xFE) { out[key] = dv.getInt32(i + 1, true); i += 5; } else if (t === 0xFD) { out[key] = dv.getFloat32(i + 1, true); i += 5; } else out[key] = str(); }
+  return out;
+}
+async function readPrefs(){
+  let bytes = null;
+  try {   // the game's live copy, if the engine shares it
+    const FS = window.unityInstance && window.unityInstance.Module && window.unityInstance.Module.FS;
+    if (FS) { const dir = FS.readdir('/idbfs').find(d => /^[0-9a-f]{32}$/.test(d)); if (dir) bytes = FS.readFile('/idbfs/' + dir + '/PlayerPrefs'); }
+  } catch (e) { bytes = null; }
+  if (!bytes) {   // the saved copy in the browser's storage
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('/idbfs'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    try {
+      if (!db.objectStoreNames.contains('FILE_DATA')) return null;
+      const os = db.transaction('FILE_DATA').objectStore('FILE_DATA');
+      const keys = await new Promise(r => { const q = os.getAllKeys(); q.onsuccess = () => r(q.result); q.onerror = () => r([]); });
+      const k = keys.find(x => /PlayerPrefs$/.test(String(x))); if (!k) return null;
+      const v = await new Promise(r => { const q = os.get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); });
+      if (v && v.contents) bytes = new Uint8Array(v.contents.buffer || v.contents, v.contents.byteOffset || 0, v.contents.byteLength || v.contents.length);
+    } finally { db.close(); }
+  }
+  if (!bytes) return null;
+  const P = parsePrefs(bytes);
+  const owned = Object.keys(P).filter(k => /carLock\d+$/.test(k) && P[k] === 1).map(k => +k.match(/(\d+)$/)[1]).sort((a, b) => a - b);
+  return { money: typeof P.money === 'number' ? P.money : null, spins: P.SpinCount || 0, car: P.car, owned };
+}
+E.readPrefs = readPrefs;
+
+/* ---- before a run, from the menu:
+ *  - spin the car machine only when there is enough money ($500 a spin)
+ *  - open the garage only when a spin happened (a new car may have been won) ---- */
+const GKEY = 'erbot_garage_v1';
+let gs = {}; try { gs = JSON.parse(localStorage.getItem(GKEY) || '{}') || {}; } catch (e) { gs = {}; }
+const saveGs = () => { try { localStorage.setItem(GKEY, JSON.stringify(gs)); } catch (e) {} };
+E.garageState = gs;
 E.garageBusy = false;
-E.cfg.garageEvery = E.cfg.garageEvery || 3;
 E.beforeRun = async () => {
-  const runs = E.stats.runs;
-  if (E.garageBusy || (E._garageAtRun !== undefined && runs - E._garageAtRun < E.cfg.garageEvery)) return;
-  E.garageBusy = true; E._garageAtRun = runs;
+  if (E.garageBusy) return;
+  E.garageBusy = true;
   try {
-    const got = await E.spinForCars(3);
-    if (got || E.bestCarRank === undefined) await E.pickBestCar();  // only after winning something new (or once)
+    let P = null; try { P = await readPrefs(); } catch (e) { P = null; }
+    E.money = P ? P.money : null;
+    const canSpin = P && P.money !== null && P.money >= 500;
+    if (canSpin) {
+      const before = P.spins;
+      const got = await E.spinForCars(Math.min(3, Math.floor(P.money / 500)));
+      if (got > 0) gs.spunAt = Date.now();
+      try { const P2 = await readPrefs(); if (P2) { E.money = P2.money; if (P2.spins > before) gs.spunAt = Date.now(); } } catch (e) {}
+    }
+    // a new car only ever comes from a spin: go to the garage after one, or if the cars you own changed
+    const ownedKey = P ? P.owned.join(',') : null;
+    const changed = ownedKey !== null && gs.owned !== undefined && ownedKey !== gs.owned;
+    const spunRecently = gs.spunAt && (!gs.pickedAt || gs.spunAt > gs.pickedAt);
+    if (spunRecently || changed) { await E.pickBestCar(); gs.pickedAt = Date.now(); }
+    if (ownedKey !== null) gs.owned = ownedKey;
+    saveGs();
   } catch (e) { E.err = 'garage:' + e; }
   E.garageBusy = false;
 };
 const prevHud = E.hudExtra;
-E.hudExtra = () => (prevHud ? prevHud() : '') + (E.spins ? ` | new cars won ${E.spins}` : '') + (E.claimed ? ` | rewards claimed ${E.claimed}` : '');
+E.hudExtra = () => (prevHud ? prevHud() : '') + (typeof E.money === 'number' ? ` | money $${E.money}` : '') + (E.spins ? ` | spins ${E.spins}` : '') + (E.claimed ? ` | rewards claimed ${E.claimed}` : '');
 })();
 
 /* ERBot v4 core: the parts of the other chat's erbot-v4.js (project doc claude/erbot-v4.js)
@@ -1930,8 +1934,9 @@ const grid = {
   cost(gx, gz){
     const c = this.raw(gx, gz); if (!c) return 0;
     if (this.water[gx + ',' + gz]) return 25;
-    if (!this.raw(gx + 1, gz) || !this.raw(gx - 1, gz) || !this.raw(gx, gz + 1) || !this.raw(gx, gz - 1)) return c + cfg.wallMargin;
-    return c;
+    const road = E.roadExtra ? E.roadExtra(gx*CS + CS/2, gz*CS + CS/2) : 0;   // roads are the fast way
+    if (!this.raw(gx + 1, gz) || !this.raw(gx - 1, gz) || !this.raw(gx, gz + 1) || !this.raw(gx, gz - 1)) return c + cfg.wallMargin + road;
+    return c + road;
   },
   openness(gx, gz, r = 2){ let ok = 0, n = 0; for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) { n++; const c = this.raw(gx + dx, gz + dz); if (c && c <= 4) ok++; } return ok/n; },
   nearestLand(x, z, maxR){
@@ -2033,6 +2038,7 @@ E.planSteer = function(p, gy, steerState, pol, car){
   }
   E.recMode = null;
   if (rlBest) { learner.trainTick(1); return { u1: rlBest.u, t1: 0.1, u2: 0, brake: rlBest.b, score: 0, alive: true, tDie: 0, pts: [], gain: 0, rl: true }; }
+  if (E.goalOverride) E.goal = E.goalOverride;   // e.g. heading for a new vehicle to steal
   const plan = basePlan.call(this, p, gy, steerState, pol, car);
   // 4) learning in the time left over (about 1.5 ms a frame)
   learner.trainTick(1.5);
@@ -2124,7 +2130,10 @@ E.planSteer = function(p, gy, steerState, pol, car){
   if (W.roadY === null) return base.call(this, p, gy, steerState, pol, car);
   // 2) in the water or not?
   const a = around(p, 3.5), low = W.roadY - gy;
-  const wetNow = a.tot > 8 && low > 0.35 && a.wet > 0.45;
+  // a boat is supposed to be on the water (and moves fast there); so is a swim toward a boat we chose
+  const boat = !onFoot && ((E.vehicleType && E.vehicleType() === 'boat') || sp > 6);
+  const toBoat = onFoot && E.dmg && E.dmg.ride && E.dmg.ride.type === 'boat' && (E.dmg.phase === 'walk' || E.dmg.phase === 'out');
+  const wetNow = !boat && !toBoat && a.tot > 8 && low > 0.35 && a.wet > 0.45;
   const dryNow = a.tot > 8 && low < 0.15 && a.wet < 0.2;
   if (wetNow) { if (!W.wetSince) W.wetSince = t; } else W.wetSince = 0;
   if (dryNow) { if (!W.drySince) W.drySince = t; } else W.drySince = 0;
@@ -2159,6 +2168,281 @@ const prevStart = E.onRunStart;
 E.onRunStart = () => { if (prevStart) prevStart(); W.roadY = null; W.inWater = false; E.inWater = false; W.wetSince = W.drySince = 0; W.target = null; W.phase = null; W.trail = []; };
 const prevHud = E.hudExtra;
 E.hudExtra = () => (prevHud ? prevHud() : '') + (W.inWater ? (W.phase === 'wait' ? ' | at the shore: waiting to get out' : ' | in the water: heading for land') : '');
+})();
+
+/* ERBot vehicle swap v2.
+ * When the vehicle starts pouring black smoke (or is on fire, or has taken too many hard hits):
+ *   1. pick the best vehicle to take next: planes, helicopters and boats beat cars (boats only when
+ *      there is water nearby), closer is better, and nothing with cops around it;
+ *   2. keep driving (dodging) toward it, and only get out at a safe moment: no cop or car close or
+ *      heading at us, slowed right down first, not in the water;
+ *   3. walk to it and get in (Space);
+ *   4. learn what each vehicle is from how it moves: on water = boat, up in the air = plane.
+ * What it learns about vehicles is kept in localStorage (erbot_vehicles_v1).
+ * Needs core + extras + brain + combine; load after water.js. */
+(function(){
+const E = window.ERBot; if (!E || !E.G) return;
+const LS = 'erbot_vehicles_v1';
+let V = {}; try { V = JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (e) { V = {}; }
+const saveV = () => { try { localStorage.setItem(LS, JSON.stringify(V)); } catch (e) {} };
+const vkey = o => o.n + '|' + (o.sc || 1).toFixed(2);
+const TYPE_SCORE = { plane: 4, heli: 4, boat: 3, tank: 2.5, car: 1 };
+const D = E.dmg = { phase: 'ok', hits: 0, score: 0, mesh: null, lastSp: 0, lastT: 0, smoke: 0, black: 0, blackBase: null, fire: 0, newAt: 0,
+  ride: null, wreck: null, exitedAt: 0, brakeSince: 0, want: false, reason: '' };
+E.cfg.swapDamage = E.cfg.swapDamage || 5;
+E.vehicleType = () => { const p = E.player; if (!p || !D.curKey) return null; return (V[D.curKey] && V[D.curKey].type) || 'car'; };
+E.knownVehicles = () => V;
+
+/* ---- what the car looks like: fire, grey smoke and black smoke just above it on screen ---- */
+const cc = document.createElement('canvas'); cc.width = 48; cc.height = 48;
+const cx = cc.getContext('2d', { willReadFrequently: true });
+function looks(f, p){
+  const M = f.vp; const ppm = Math.abs(M[0])*E.uc.width/2*1.414;
+  const sx = M[0]*p.x + M[4]*(p.y + 1.2) + M[8]*p.z + M[12], sy = M[1]*p.x + M[5]*(p.y + 1.2) + M[9]*p.z + M[13];
+  const px = (sx + 1)/2*E.uc.width, py = (1 - sy)/2*E.uc.height, R = ppm*2.2;
+  cx.drawImage(E.uc, px - R, py - R*1.5, 2*R, 1.5*R, 0, 0, 48, 48);
+  const d = cx.getImageData(0, 0, 48, 48).data; let fire = 0, smoke = 0, black = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i+1], b = d[i+2], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (r > 210 && g > 70 && g < 200 && b < 70 && r - g > 45) fire++;
+    else if (mx - mn < 12 && mx < 55) black++;
+    else if (mx - mn < 14 && mx >= 55 && mx < 120) smoke++;
+  }
+  const n = d.length/4; return [fire/n, smoke/n, black/n];
+}
+
+/* ---- candidates to take next ---- */
+function rideScore(o, p, cops){
+  const d = Math.hypot(o.x - p.x, o.z - p.z);
+  const type = (V[vkey(o)] && V[vkey(o)].type) || 'car';
+  if (type === 'boat' && !(E.water && E.water.roadY !== null && nearWater(o))) return null;   // a boat on dry land is useless
+  let s = (TYPE_SCORE[type] || 1)*2 - d/8;
+  let cop = 99; for (const c of cops) cop = Math.min(cop, Math.hypot(c.x - o.x, c.z - o.z));
+  if (cop < 10) return null; s -= Math.max(0, 25 - cop)*0.1;
+  if (D.wreck && Math.hypot(o.x - D.wreck.x, o.z - D.wreck.z) < 4) return null;          // not the one we just left
+  return { x: o.x, z: o.z, key: vkey(o), mesh: o.mesh, type, d, s };
+}
+function nearWater(o){ const G = E.G; for (const [dx, dz] of [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2]]) { const c = E.gridAt(o.x + dx, o.z + dz); if (c >= 0 && G.seen[c] && G.h[c] < E.water.roadY - 0.3) return true; } return false; }
+function findRide(f, p){
+  const cops = (E.others || []).filter(o => Math.hypot(o.vx, o.vz) > 3);
+  const out = [], seen = new Set();
+  // vehicles it has seen move (traffic) that are standing still now, and any vehicle it has learned it can get into
+  for (const o of f.objs.concat(f.all || [])) {
+    if (o.n < 150 || o.y < -2 || o.y > 6 || o.mesh === (E.player && E.player.mesh)) continue;
+    const known = !!V[vkey(o)], mover = E.vehicleMeshes && E.vehicleMeshes.has(o.mesh);
+    if (!known && !mover) continue;
+    const d = Math.hypot(o.x - p.x, o.z - p.z); if (d > 45) continue;
+    const k = o.mesh + ':' + o.x.toFixed(0) + ':' + o.z.toFixed(0); if (seen.has(k)) continue; seen.add(k);
+    let moving = false; for (const t of (E.others || [])) if (Math.hypot(t.x - o.x, t.z - o.z) < 1.5 && Math.hypot(t.vx, t.vz) > 2.5) { moving = true; break; }
+    if (moving) continue;
+    const r = rideScore(o, p, cops); if (r) out.push(r);
+  }
+  out.sort((a, b) => b.s - a.s);
+  return out[0] || null;
+}
+// safe to stop and step out here?
+function safeToExit(p){
+  if (E.inWater) return false;
+  for (const o of (E.others || [])) {
+    const d = Math.hypot(o.x - p.x, o.z - p.z), sp = Math.hypot(o.vx, o.vz);
+    if (sp > 3 && d < 16) return false;                                 // a cop (or fast car) close by
+    for (const t of [0.5, 1, 1.5, 2, 2.5]) if (Math.hypot(o.x + o.vx*t - p.x, o.z + o.vz*t - p.z) < 5) return false;   // will run us over
+  }
+  return true;
+}
+
+let fc = 0;
+E.hooks.swap = function(f){
+  const p = E.player;
+  if (E.mode !== 'play' || !p || !f.vp) { E.goalOverride = null; E.footTargets = null; return; }
+  const onFoot = E.footState && E.footState.on, human = E.humanActive && E.humanActive();
+  // ---- got into something new: remember it as a vehicle we can use
+  if (!onFoot && p.mesh !== D.mesh) {
+    const prevMesh = D.mesh; D.mesh = p.mesh; D.curKey = p.n + '|' + ((f.objs.find(o => o.mesh === p.mesh) || {}).sc || 1).toFixed(2);
+    if (prevMesh && (D.phase === 'walk' || D.phase === 'out' || human)) { const v = V[D.curKey] || (V[D.curKey] = { type: 'car', uses: 0 }); v.uses++; saveV(); E.swaps = (E.swaps || 0) + 1; }
+    D.hits = 0; D.score = 0; D.smoke = 0; D.black = 0; D.blackBase = null; D.fire = 0; D.newAt = f.t; D.lastSp = p.speed; D.lastT = f.t;
+    D.phase = 'ok'; D.ride = null; E.goalOverride = null; E.footTargets = null; D.want = false; D.flyT = 0; D.boatT = 0;
+    return;
+  }
+  // ---- learn what this vehicle is from how it moves
+  if (!onFoot && D.curKey) {
+    const W = E.water, v = V[D.curKey] || (V[D.curKey] = { type: 'car', uses: 0 });
+    if (W && W.roadY !== null && p.y > W.roadY + 2.5) { D.flyT = (D.flyT || 0) + 1; if (D.flyT > 30 && v.type !== 'plane') { v.type = 'plane'; saveV(); } }
+    if (W && W.roadY !== null && p.speed > 5 && E.groundY < W.roadY - 0.4) { D.boatT = (D.boatT || 0) + 1; if (D.boatT > 60 && v.type !== 'boat' && v.type !== 'plane') { v.type = 'boat'; saveV(); } }
+  }
+  // (you are driving: it only watches and learns which vehicles are what)
+  if (human || !E.enabled) { E.goalOverride = null; E.footTargets = null; return; }
+  // ---- damage
+  if (!onFoot) {
+    const dt = (f.t - D.lastT)/1000;
+    if (dt > 0 && dt < 0.3 && D.lastSp - p.speed > 6 && D.lastSp > 9) { D.hits++; D.score += 1 + Math.min(2, (D.lastSp - p.speed)/10); }
+    D.lastSp = p.speed; D.lastT = f.t;
+    if ((++fc) % 6 === 0) {
+      const [fi, sm, bl] = looks(f, p);
+      D.fire = D.fire*0.8 + fi*0.2; D.smoke = D.smoke*0.8 + sm*0.2; D.black = D.black*0.85 + bl*0.15;
+      // what "normal" looks like for this vehicle on these roads, learned in its first seconds
+      if (f.t - D.newAt < 4000 || D.blackBase === null) D.blackBase = D.blackBase === null ? D.black : D.blackBase*0.9 + D.black*0.1;
+    }
+    const blackSmoke = D.blackBase !== null && f.t - D.newAt > 4000 && D.black - D.blackBase > 0.06;
+    const burning = D.fire > 0.025;
+    const wrecked = D.score >= E.cfg.swapDamage;
+    if (D.phase === 'ok' && (blackSmoke || burning || wrecked)) { D.phase = 'want'; D.reason = blackSmoke ? 'black smoke' : burning ? 'on fire' : 'badly damaged'; D.wantSince = f.t; }
+  }
+  D.want = D.phase !== 'ok';
+  // ---- want out: pick the next vehicle, drive toward it, get out when it's safe
+  if (D.phase === 'want') {
+    if (!D.ride || (++D.rideCheck || 0) % 20 === 0) D.ride = findRide(f, p) || D.ride;
+    E.goalOverride = D.ride ? { x: D.ride.x, z: D.ride.z } : null;
+    const near = D.ride && Math.hypot(D.ride.x - p.x, D.ride.z - p.z) < 14;
+    const waited = f.t - D.wantSince > 12000;           // nothing good around: take any safe moment
+    if ((near || waited) && safeToExit(p)) {
+      if (p.speed > 5) { E.brakeHold = f.t; }           // slow down first (the brain brakes while this is set)
+      else { D.phase = 'out'; D.exitedAt = f.t; D.wreck = { x: p.x, z: p.z }; E.releaseAll(); E.tap(' ', 90); }
+    }
+  } else if (D.phase === 'out' || D.phase === 'walk') {
+    // ---- on foot: walk to the chosen vehicle (the on-foot logic presses Space to get in)
+    if (onFoot) D.phase = 'walk';
+    if (!D.ride || (++D.rideCheck || 0) % 15 === 0) D.ride = findRide(f, p) || D.ride;
+    E.footTargets = D.ride ? [{ x: D.ride.x, z: D.ride.z }] : null;
+    E.goalOverride = D.ride ? { x: D.ride.x, z: D.ride.z } : null;
+    if (f.t - D.exitedAt > 25000) { D.phase = 'ok'; D.ride = null; E.footTargets = null; E.goalOverride = null; }   // give up the plan
+    if (!onFoot && f.t - D.exitedAt > 2500 && D.phase === 'out') { D.phase = 'want'; D.wantSince = f.t; }      // the game didn't let us out
+  }
+};
+// while slowing down to get out safely, hold the brake
+const basePlan = E.planSteer;
+E.planSteer = function(p, gy, ss, pol, car){
+  const plan = basePlan.call(this, p, gy, ss, pol, car);
+  if (plan && D.phase === 'want' && E.brakeHold && performance.now() - E.brakeHold < 300) plan.brake = 1;
+  return plan;
+};
+const prevStart = E.onRunStart;
+E.onRunStart = () => { if (prevStart) prevStart(); D.phase = 'ok'; D.ride = null; D.mesh = null; D.wreck = null; E.goalOverride = null; E.footTargets = null; };
+const names = { plane: 'a plane', heli: 'a helicopter', boat: 'a boat', tank: 'a tank', car: 'a car' };
+const prevHud = E.hudExtra;
+E.hudExtra = () => (prevHud ? prevHud() : '') +
+  (D.phase === 'want' ? ` | ${D.reason}: heading for ${D.ride ? names[D.ride.type] || 'a vehicle' : 'a safe spot'} to get out` : D.phase === 'out' || D.phase === 'walk' ? ` | on foot: going to ${D.ride ? names[D.ride.type] || 'a vehicle' : 'find a vehicle'}` : '') +
+  (E.swaps ? ` | vehicles swapped ${E.swaps}` : '') + (E.vehicleType && E.vehicleType() && E.vehicleType() !== 'car' ? ` | driving ${names[E.vehicleType()]}` : '');
+})();
+
+/* ERBot roads: maps where the roads are, uses them to get places fast, and goes off-road when that
+ * helps (a much shorter way, or losing the cops among trees, rocks and buildings).
+ *
+ * How it sees roads: traffic drives on roads, so the colour of the ground right behind moving
+ * traffic is the road colour. Ground the bot sees that matches it is road; other flat ground is
+ * off-road. Until it has seen enough traffic it uses "grey asphalt" as a first guess.
+ * It also measures whether this car is slower off-road, and prefers roads more if it is.
+ *
+ * The map of the last run (open ground, walls, roads, water) is saved for the Trainer's map as
+ * world "Last run" in erbot_map_v1. Needs core + map + combine (+ water). */
+(function(){
+const E = window.ERBot; if (!E || !E.G) return;
+const G = E.G;
+const CELL = 2;                                   // road map cell (m)
+const R = E.roads = { color: null, colorN: 0, votes: new Map(), onRoad: 0, offRoad: 0, spRoad: [0, 0], spOff: [0, 0], offCost: 1, frac: null };
+const keyOf = (x, z) => Math.floor(x/CELL) + ',' + Math.floor(z/CELL);
+
+const cv = document.createElement('canvas'); cv.width = 192; cv.height = 120;
+const cx = cv.getContext('2d', { willReadFrequently: true });
+function project(M, x, y, z){ const sx = M[0]*x + M[4]*y + M[8]*z + M[12], sy = M[1]*x + M[5]*y + M[9]*z + M[13], w = M[3]*x + M[7]*y + M[11]*z + M[15] || 1; return [(sx/w + 1)/2*cv.width, (1 - sy/w)/2*cv.height]; }
+const pix = (d, u, v) => { const i = 4*(Math.round(v)*cv.width + Math.round(u)); return [d[i], d[i+1], d[i+2]]; };
+const sat = c => Math.max(c[0], c[1], c[2]) - Math.min(c[0], c[1], c[2]);
+const lum = c => (c[0] + c[1] + c[2])/3;
+function isRoadColor(c){
+  if (R.color && R.colorN > 40) return Math.hypot(c[0] - R.color[0], c[1] - R.color[1], c[2] - R.color[2]) < 30;
+  return sat(c) < 22 && lum(c) > 40 && lum(c) < 150;    // first guess: grey asphalt
+}
+E.roadProb = (x, z) => { const v = R.votes.get(keyOf(x, z)); if (!v || v[0] + v[1] < 2) return null; return v[0]/(v[0] + v[1]); };
+
+let fc = 0, ring = 0;
+E.hooks.roads = function(f){
+  const p = E.player, gy = E.groundY;
+  if (E.mode !== 'play' || !p || !f.vp || typeof gy !== 'number' || (++fc) % 5) return;
+  cx.drawImage(E.uc, 0, 0, cv.width, cv.height);
+  const d = cx.getImageData(0, 0, cv.width, cv.height).data, M = f.vp;
+  const inView = (u, v) => u >= 1 && v >= 1 && u < cv.width - 1 && v < cv.height - 1;
+  // 1) learn the road colour from behind moving traffic
+  for (const o of (E.others || [])) {
+    const sp = Math.hypot(o.vx, o.vz); if (sp < 3 || sp > 14) continue;
+    const bx = o.x - o.vx/sp*3.2, bz = o.z - o.vz/sp*3.2;
+    if (Math.hypot(bx - p.x, bz - p.z) < 3) continue;
+    const [u, v] = project(M, bx, gy, bz); if (!inView(u, v)) continue;
+    const c = pix(d, u, v); if (sat(c) > 60) continue;        // a car or a marking, not the road
+    if (!R.color) R.color = c.slice(); else for (let k = 0; k < 3; k++) R.color[k] += (c[k] - R.color[k])*0.05;
+    R.colorN++;
+  }
+  // 2) classify flat ground around the car (a different slice of the ring each time)
+  const others = E.others || [];
+  ring = (ring + 1) % 4;
+  for (let rr = 4 + ring*1.5; rr <= 26; rr += 6) for (let a = 0; a < 24; a++) {
+    const ang = a/24*Math.PI*2 + ring*0.13, x = p.x + Math.cos(ang)*rr, z = p.z + Math.sin(ang)*rr;
+    const c0 = E.gridAt(x, z); if (c0 < 0 || !G.seen[c0] || Math.abs(G.h[c0] - gy) > 0.25 || G.dist[c0] < 1) continue;
+    let blocked = false; for (const o of others) if (Math.hypot(o.x - x, o.z - z) < 2.8) { blocked = true; break; }
+    if (blocked) continue;
+    const [u, v] = project(M, x, gy, z); if (!inView(u, v)) continue;
+    const road = isRoadColor(pix(d, u, v)), k = keyOf(x, z), vv = R.votes.get(k) || [0, 0];
+    vv[road ? 0 : 1] = Math.min(250, vv[road ? 0 : 1] + 1); R.votes.set(k, vv);
+  }
+  // 3) where the car is now, and how fast it goes there (straight driving only)
+  const here = E.roadProb(p.x, p.z);
+  if (here !== null && !(E.footState && E.footState.on)) {
+    const onRoad = here > 0.5; if (onRoad) R.onRoad++; else R.offRoad++;
+    R.frac = R.onRoad/(R.onRoad + R.offRoad);
+    if (Math.abs(E.steerState || 0) < 0.2 && !E.b && p.speed > 3) { const s = onRoad ? R.spRoad : R.spOff; s[0] += p.speed; s[1]++; }
+    if (R.spRoad[1] > 50 && R.spOff[1] > 50) {
+      const slow = 1 - (R.spOff[0]/R.spOff[1])/(R.spRoad[0]/R.spRoad[1]);
+      R.offCost = slow > 0.12 ? 2 : slow > 0.05 ? 1 : 0.5;     // off-road is slower in this car: stick to roads more
+    }
+  }
+  if (fc % 15 === 0) mapTick(p, gy);
+};
+// the route planner's view: off-road costs a little more (roads are the fast way), except when
+// cops are close (then any way out is fine, and obstacles off-road slow the cops down)
+E.roadExtra = (x, z) => {
+  const pr = E.roadProb(x, z); if (pr === null || pr > 0.5) return 0;
+  const p = E.player; if (p) for (const o of (E.others || [])) if (Math.hypot(o.vx, o.vz) > 6 && Math.hypot(o.x - p.x, o.z - p.z) < 20) return 0;
+  return R.offCost;
+};
+
+/* ---- the last run's map for the Trainer (same layout as erbot_map_v1: 51.2 m chunks of 32x32 cells) ---- */
+const CS = 51.2, CC = 32, FC = CS/CC;
+const chunks = new Map();   // "cx,cz" -> Uint8Array(1024) open/obstacle counts
+function mapTick(p, gy){
+  for (let dz = -24; dz <= 24; dz += FC) for (let dx = -24; dx <= 24; dx += FC) {
+    const x = p.x + dx, z = p.z + dz, c = E.gridAt(x, z); if (c < 0 || !G.seen[c]) continue;
+    const ccx = Math.floor(x/CS), ccz = Math.floor(z/CS), k = ccx + ',' + ccz;
+    let a = chunks.get(k); if (!a) { a = new Uint8Array(CC*CC); chunks.set(k, a); }
+    const i = Math.floor((z - ccz*CS)/FC)*CC + Math.floor((x - ccx*CS)/FC), v = a[i];
+    const W = E.water;
+    if (W && W.roadY !== null && G.h[c] < W.roadY - 0.3) { (W.wetCells || (W.wetCells = new Set())).add(Math.floor(x/6.4) + ',' + Math.floor(z/6.4)); continue; }
+    const wall = G.h[c] > gy + E.cfg.obstacleHeight;
+    if (wall) a[i] = (v & 0xF0) | Math.min(15, (v & 15) + 1); else a[i] = (Math.min(7, (v >> 4) + 1) << 4) | (v & 15);
+  }
+}
+const b64 = a => { let s = ''; for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s); };
+function saveLastRun(){
+  if (!chunks.size) return;
+  let M = { version: 1, worlds: {} }; try { M = JSON.parse(localStorage.getItem('erbot_map_v1') || 'null') || M; } catch (e) {}
+  M.worlds = M.worlds || {};
+  const w = { chunks: {}, roads: {}, water: {}, bags: [], runs: 1, lastRun: true, saved: Date.now(), roadShare: R.frac };
+  for (const [k, a] of chunks) {
+    w.chunks[k] = b64(a);
+    const [ccx, ccz] = k.split(',').map(Number), r = new Uint8Array(CC*CC); let any = false;
+    for (let iz = 0; iz < CC; iz++) for (let ix = 0; ix < CC; ix++) { const pr = E.roadProb(ccx*CS + (ix + 0.5)*FC, ccz*CS + (iz + 0.5)*FC); if (pr !== null) { r[iz*CC + ix] = 1 + Math.round(pr*254); any = true; } }
+    if (any) w.roads[k] = b64(r);
+  }
+  // water cells (6.4 m blocks, like the Trainer expects) from the ground the bot saw below road level
+  if (E.water && E.water.roadY !== null && E.water.wetCells) for (const k of E.water.wetCells) w.water[k] = 1;
+  M.worlds['Last run'] = w;
+  try { localStorage.setItem('erbot_map_v1', JSON.stringify(M)); }
+  catch (e) { try { M.worlds = { 'Last run': w }; localStorage.setItem('erbot_map_v1', JSON.stringify(M)); } catch (e2) {} }
+}
+const prevEnd = E.onRunEnd;
+E.onRunEnd = (dur) => { try { saveLastRun(); } catch (e) {} if (prevEnd) prevEnd(dur); };
+const prevStart = E.onRunStart;
+E.onRunStart = () => { if (prevStart) prevStart(); R.votes.clear(); chunks.clear(); R.onRoad = R.offRoad = 0; R.frac = null; if (E.water) E.water.wetCells = new Set(); };
+const prevHud = E.hudExtra;
+E.hudExtra = () => (prevHud ? prevHud() : '') + (R.frac !== null ? ` | on road ${Math.round(R.frac*100)}%` : '');
 })();
 
 /* ERBot watchdog: ends a run that has gone nowhere (stuck in water, wedged in a corner,

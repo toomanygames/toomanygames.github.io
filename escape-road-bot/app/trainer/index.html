@@ -105,6 +105,7 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 .toast.show { display: block; }
 @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
 #liveChart { width: 100%; height: 150px; display: block; }
+#worldSel { background: var(--asphalt-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: 13px var(--body); }
 #rlChart { width: 100%; height: 160px; display: block; }
 #simView { width: 100%; aspect-ratio: 1; display: block; background: #0b0e13; border-radius: 8px; }
 .live-panel { margin-bottom: 18px; }
@@ -194,13 +195,14 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 
   <div class="col">
     <section class="panel" aria-labelledby="h-map">
-      <div class="row"><h2 id="h-map">Map and test drive</h2><span class="step">4</span></div>
+      <div class="row"><h2 id="h-map">Map and test drive</h2><select id="worldSel" hidden aria-label="Which map"></select><span class="step">4</span></div>
       <div class="mapwrap">
         <canvas id="map" aria-label="Explored map with remembered money bags"></canvas>
         <div class="hud" id="hud"></div>
         <div class="maptools"><button type="button" id="zoomIn" aria-label="Zoom in">+</button><button type="button" id="zoomOut" aria-label="Zoom out">−</button><button type="button" id="fitBtn">Fit</button></div>
         <div class="legend" aria-hidden="true">
-          <span><i style="background:#3a4556"></i>explored road</span>
+          <span><i style="background:#3a4556"></i>explored ground</span>
+          <span><i style="background:#808a9c"></i>road</span>
           <span><i style="background:#8f3340"></i>wall / building</span>
           <span><i style="background:#2f6fd6"></i>water</span>
           <span><i style="background:var(--amber);border-radius:50%"></i>money bag</span>
@@ -260,7 +262,8 @@ function load(text, label) {
   S.save = save; S.brain = brain; S.map = map; S.scores = []; S.cleanedOnce = !!brain.v4cleaned;
   S.trainedNet = brain.v4net || null;
   const keys = Object.keys(map.worlds || {});
-  S.worldKey = keys.sort((a, b) => Object.keys(map.worlds[b].chunks || {}).length - Object.keys(map.worlds[a].chunks || {}).length)[0] || '0,0';
+  S.worldKey = keys.includes('Last run') ? 'Last run' : keys.sort((a, b) => Object.keys(map.worlds[b].chunks || {}).length - Object.keys(map.worlds[a].chunks || {}).length)[0] || '0,0';
+  const sel = $('worldSel'); if (sel) { sel.innerHTML = Object.keys(map.worlds || {}).map(k => `<option value="${k.replace(/"/g, '&quot;')}"${k === S.worldKey ? ' selected' : ''}>${k === 'Last run' ? 'Last run (with roads)' : 'Map ' + k}</option>`).join(''); sel.hidden = Object.keys(map.worlds || {}).length < 2; }
   for (const k of Object.keys(TESTED)) if (cfg[k] !== undefined) style[k] = cfg[k];
   syncStyleUI();
   buildMapImage(); fitMap(); renderTiles(); drawChart(); renderScoreTable();
@@ -467,6 +470,17 @@ function buildMapImage() {
       d[o] = r; d[o + 1] = gg; d[o + 2] = b; d[o + 3] = a;
     }
   }
+  // roads (the bot's "Last run" map knows where the roads are)
+  for (const [cx, cz] of keys) {
+    const rk = w.roads && w.roads[cx + ',' + cz]; if (!rk) continue;
+    const rb = b64(rk);
+    for (let iz = 0; iz < 32; iz++) for (let ix = 0; ix < 32; ix++) {
+      const v = rb[iz * 32 + ix]; if (v < 160) continue;   // stored as 1 + 254 x chance of road
+      const px = (cx - X0) * 32 + ix, pz = (cz - Z0) * 32 + iz, o = (pz * Wd + px) * 4;
+      if (d[o] === 143 && d[o + 1] === 51) continue;      // a wall stays a wall
+      d[o] = 128; d[o + 1] = 138; d[o + 2] = 156; d[o + 3] = 255;
+    }
+  }
   // water
   for (const k of Object.keys(w.water || {})) {
     const [gx, gz] = k.split(',').map(Number);
@@ -623,6 +637,7 @@ function watch() {
   watchRAF = requestAnimationFrame(loop);
 }
 $('watchBtn').onclick = watch;
+$('worldSel').onchange = e => { S.worldKey = e.target.value; freeCache = null; buildMapImage(); fitMap(); renderTiles(); };
 $('testBtn').onclick = runTest;
 $('cleanBtn').onclick = () => { if (!S.busy) clean(); };
 $('trainBtn').onclick = train;
