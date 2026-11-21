@@ -1,4 +1,4 @@
-window.ERBOT_VERSION = '1.11.0';
+window.ERBOT_VERSION = '1.11.1';
 /*
  * Escape Road 3 autopilot
  * ------------------------------------------------------------
@@ -45,6 +45,9 @@ function runQ(){
   B.frames++;
 }
 window.requestAnimationFrame = function(cb){ const id = B.rafId++; B.rafQ.push([id, cb]); return id; };
+// If the game's frame loop is waiting on the browser's own frame callback (window hidden, covered or
+// minimised when the bot started), restart it once so it runs on the bot's frame clock from now on.
+try { const M = window.unityInstance && window.unityInstance.Module; if (M && M.pauseMainLoop && M.resumeMainLoop && !window.__erbKicked) { window.__erbKicked = 1; M.pauseMainLoop(); M.resumeMainLoop(); } } catch (e) {}
 window.cancelAnimationFrame = function(id){ B.rafQ = B.rafQ.filter(x => x[0] !== id); };
 (function timerLoop(){ if (!B.alive) return; origST(timerLoop, 16); runQ(); })();
 (function rafLoop(){ if (!B.alive) return; realRaf(rafLoop); runQ(); })();
