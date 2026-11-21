@@ -524,7 +524,8 @@ function onFrame(){
 /* ---------- 9. Screen states (menu / game over / popup / play) ---------- */
 const cap = document.createElement('canvas'); cap.width = 240; cap.height = 150;
 const cx2 = cap.getContext('2d', { willReadFrequently: true });
-B.grabOnce = () => new Promise(res => { B.hooks.grab = () => { delete B.hooks.grab; cx2.drawImage(uc, 0, 0, 240, 150); res(cx2.getImageData(0, 0, 240, 150)); }; });
+const grabWait = [];
+B.grabOnce = () => new Promise(res => { grabWait.push(res); B.hooks.grab = () => { delete B.hooks.grab; cx2.drawImage(uc, 0, 0, 240, 150); const im = cx2.getImageData(0, 0, 240, 150); for (const r of grabWait.splice(0)) r(im); }; });
 function getState(im){
   const W = im.width, H = im.height, d = im.data;
   const px = (u, v) => { const i = 4*(Math.floor(v*H)*W + Math.floor(u*W)); return [d[i], d[i+1], d[i+2]]; };
@@ -1204,7 +1205,13 @@ const E = window.ERBot; if (!E || !E.G) return;
 const sleep = E.sleep;
 const cv = document.createElement('canvas'); const cx = cv.getContext('2d', { willReadFrequently: true });
 // grab the current frame (full resolution) right after it is drawn
-E.frameImage = () => new Promise(res => { E.hooks.fullGrab = () => { delete E.hooks.fullGrab; cv.width = E.uc.width; cv.height = E.uc.height; cx.drawImage(E.uc, 0, 0); res(cx.getImageData(0, 0, cv.width, cv.height)); }; });
+// a copy of the next drawn frame; several callers can wait at once, and nobody waits forever
+let lastImg = null; const waiting = [];
+E.frameImage = () => new Promise(res => {
+  waiting.push(res);
+  E.hooks.fullGrab = () => { delete E.hooks.fullGrab; cv.width = E.uc.width; cv.height = E.uc.height; cx.drawImage(E.uc, 0, 0); lastImg = cx.getImageData(0, 0, cv.width, cv.height); for (const r of waiting.splice(0)) r(lastImg); };
+  setTimeout(() => { const i = waiting.indexOf(res); if (i >= 0) { waiting.splice(i, 1); res(lastImg || new ImageData(Math.max(1, E.uc.width), Math.max(1, E.uc.height))); } }, 3000);
+});
 const at = (u, v) => E.click(u*innerWidth, v*innerHeight);
 const key = async (k, code, kc) => { window.dispatchEvent(new KeyboardEvent('keydown', { key:k, code, keyCode:kc, which:kc, bubbles:true })); await sleep(90); window.dispatchEvent(new KeyboardEvent('keyup', { key:k, code, keyCode:kc, which:kc, bubbles:true })); };
 function region(im, u0, v0, u1, v1, fn){ const W = im.width, H = im.height, d = im.data; for (let y = Math.floor(v0*H); y < v1*H; y++) for (let x = Math.floor(u0*W); x < u1*W; x++) { const i = 4*(y*W + x); fn(d[i], d[i+1], d[i+2], x, y); } }
